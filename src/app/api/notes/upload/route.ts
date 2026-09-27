@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server'
+﻿import { NextResponse } from 'next/server'
 import { getPayload } from 'payload'
 import config from '@/payload.config'
 import path from 'path'
@@ -89,7 +89,7 @@ export async function POST(req: Request) {
         name: name.trim(),
         chapter: chapter.trim() || name.trim(),
         type: (type as any) || 'Notes',
-        subject: isNaN(Number(resolvedSubjectId)) ? resolvedSubjectId : Number(resolvedSubjectId),
+        subject: (isNaN(Number(resolvedSubjectId)) ? resolvedSubjectId : Number(resolvedSubjectId)) as any,
       },
       file: {
         data: fileBuffer,

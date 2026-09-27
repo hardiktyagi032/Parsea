@@ -56,6 +56,16 @@ const QUICK_FOLLOW_UPS = [
   'Summarise key takeaways in a table',
 ]
 
+
+const VOICE_OPTIONS = [
+  { id: 'auto', label: 'Auto (Hindi / English)' },
+  { id: 'hi-IN-SwaraNeural', label: 'Hindi - Swara (Female)' },
+  { id: 'hi-IN-MadhurNeural', label: 'Hindi - Madhur (Male)' },
+  { id: 'en-IN-NeerjaNeural', label: 'English (IN) - Neerja (Female)' },
+  { id: 'en-IN-PrabhatNeural', label: 'English (IN) - Prabhat (Male)' },
+  { id: 'en-US-JennyNeural', label: 'English (US) - Jenny (Female)' },
+]
+
 const STARTERS = [
   'Explain pigeonhole principle with theorem statement',
   'What is the difference between relation and function?',
@@ -71,6 +81,155 @@ export default function ChatPage() {
   const [subject, setSubject] = useState('Discrete Mathematics')
   const [showFilters, setShowFilters] = useState(false)
   const [selectedImage, setSelectedImage] = useState<string | null>(null)
+
+  
+  // Voice States
+  const [selectedVoice, setSelectedVoice] = useState<string>('auto')
+  const [isRecording, setIsRecording] = useState(false)
+  const [isTranscribing, setIsTranscribing] = useState(false)
+  const [voiceError, setVoiceError] = useState<string | null>(null)
+  const [playingMessageId, setPlayingMessageId] = useState<string | null>(null)
+  const [loadingTTSId, setLoadingTTSId] = useState<string | null>(null)
+
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
+  const audioChunksRef = useRef<Blob[]>([])
+  const audioElementRef = useRef<HTMLAudioElement | null>(null)
+
+  useEffect(() => {
+    const saved = localStorage.getItem('parsea_voice')
+    if (saved) setSelectedVoice(saved)
+  }, [])
+
+  const handleVoiceChange = (v: string) => {
+    setSelectedVoice(v)
+    localStorage.setItem('parsea_voice', v)
+  }
+
+  // Mic Recording (MediaRecorder STT)
+  const startRecording = async () => {
+    setVoiceError(null)
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      mediaRecorderRef.current = new MediaRecorder(stream)
+      audioChunksRef.current = []
+
+      mediaRecorderRef.current.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data)
+        }
+      }
+
+      mediaRecorderRef.current.onstop = async () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' })
+        stream.getTracks().forEach((track) => track.stop())
+        await processAudioTranscription(audioBlob)
+      }
+
+      mediaRecorderRef.current.start()
+      setIsRecording(true)
+    } catch (err: any) {
+      console.error('Microphone error:', err)
+      setVoiceError('Could not access microphone. Please check permissions.')
+    }
+  }
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop()
+      setIsRecording(false)
+    }
+  }
+
+  const toggleRecording = () => {
+    if (isRecording) {
+      stopRecording()
+    } else {
+      startRecording()
+    }
+  }
+
+  const processAudioTranscription = async (blob: Blob) => {
+    setIsTranscribing(true)
+    setVoiceError(null)
+    try {
+      const formData = new FormData()
+      formData.append('file', blob, 'recording.webm')
+
+      const res = await fetch('/api/voice/stt', {
+        method: 'POST',
+        body: formData,
+      })
+
+      const data = await res.json()
+      if (!res.ok || data.error) {
+        throw new Error(data.error || 'Speech transcription failed')
+      }
+
+      if (data.text) {
+        setInputQuestion(data.text)
+      }
+    } catch (err: any) {
+      console.error('STT Error:', err)
+      setVoiceError(err?.message || 'Error processing speech transcription')
+    } finally {
+      setIsTranscribing(false)
+    }
+  }
+
+  // Text-to-Speech (TTS)
+  const handlePlayTTS = async (msgId: string, text: string) => {
+    if (playingMessageId === msgId) {
+      if (audioElementRef.current) {
+        audioElementRef.current.pause()
+      }
+      setPlayingMessageId(null)
+      return
+    }
+
+    if (audioElementRef.current) {
+      audioElementRef.current.pause()
+    }
+
+    setLoadingTTSId(msgId)
+    setPlayingMessageId(null)
+    setVoiceError(null)
+
+    try {
+      const res = await fetch('/api/voice/tts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, voice: selectedVoice }),
+      })
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}))
+        throw new Error(errData.error || 'TTS synthesis failed')
+      }
+
+      const audioBlob = await res.blob()
+      const audioUrl = URL.createObjectURL(audioBlob)
+
+      const audio = new Audio(audioUrl)
+      audioElementRef.current = audio
+
+      audio.onended = () => {
+        setPlayingMessageId(null)
+      }
+
+      audio.onerror = () => {
+        setPlayingMessageId(null)
+        setVoiceError('Failed to play synthesized audio')
+      }
+
+      await audio.play()
+      setPlayingMessageId(msgId)
+    } catch (err: any) {
+      console.error('TTS Error:', err)
+      setVoiceError(err?.message || 'Error generating voice response')
+    } finally {
+      setLoadingTTSId(null)
+    }
+  }
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const [isStreaming, setIsStreaming] = useState(false)
@@ -319,7 +478,38 @@ export default function ChatPage() {
                 {/* Status badges */}
                 <div className="chat-card-header">
                   <span className="chat-card-label">Response</span>
-                  <div className="chat-card-badges">
+                  <div className="chat-card-badges" style={{ alignItems: 'center' }}>
+
+                    {/* TTS Speaker Button */}
+                    <button
+                      type="button"
+                      onClick={() => handlePlayTTS(msg.id, msg.content)}
+                      title={playingMessageId === msg.id ? 'Pause Voice' : 'Read aloud with Edge-TTS'}
+                      disabled={loadingTTSId === msg.id}
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 4,
+                        padding: '3px 8px',
+                        fontSize: '0.75rem',
+                        borderRadius: 6,
+                        border: '1px solid var(--border-default)',
+                        background: playingMessageId === msg.id ? 'var(--green-100)' : 'var(--bg-surface)',
+                        color: playingMessageId === msg.id ? 'var(--green-800)' : 'var(--text-primary)',
+                        cursor: 'pointer',
+                        fontWeight: 600,
+                        marginRight: 6,
+                      }}
+                    >
+                      {loadingTTSId === msg.id ? (
+                        <span>⏳ Synthesizing...</span>
+                      ) : playingMessageId === msg.id ? (
+                        <span>🔊 Pause ⏸️</span>
+                      ) : (
+                        <span>🔊 Listen</span>
+                      )}
+                    </button>
+
                     {msg.retrievalBypassed && (
                       <span
                         className="badge badge-blue badge-rounded"
@@ -458,14 +648,49 @@ export default function ChatPage() {
                 ? "Ask anything — e.g. 'explain pigeonhole principle with diagrams'…"
                 : "Ask a follow-up — reuses cached context, no extra DB query…"
             }
-            disabled={isPending}
+            disabled={isPending || isTranscribing}
             style={{ flex: 1 }}
           />
+
+          
+          {/* Microphone Recording Toggle Button */}
+          <button
+            type="button"
+            onClick={toggleRecording}
+            disabled={isPending || isTranscribing}
+            title={isRecording ? 'Stop Recording' : 'Voice Input (Groq Whisper STT)'}
+            style={{
+              flexShrink: 0,
+              padding: '0 12px',
+              height: 38,
+              borderRadius: 8,
+              border: isRecording ? '1px solid #ef5350' : '1px solid var(--border-default)',
+              background: isRecording ? '#ffebee' : 'var(--bg-surface)',
+              color: isRecording ? '#d32f2f' : 'var(--text-primary)',
+              cursor: 'pointer',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              fontSize: '0.85rem',
+              fontWeight: 600,
+            }}
+          >
+            {isTranscribing ? (
+              <span>⏳</span>
+            ) : isRecording ? (
+              <>
+                <span style={{ color: '#d32f2f' }}>🔴</span>
+                <span>Stop</span>
+              </>
+            ) : (
+              <span>🎙️</span>
+            )}
+          </button>
 
           <button
             type="submit"
             className="btn btn-primary"
-            disabled={isPending || !inputQuestion.trim()}
+            disabled={isPending || !inputQuestion.trim() || isTranscribing}
             style={{ flexShrink: 0 }}
           >
             {isPending ? (
