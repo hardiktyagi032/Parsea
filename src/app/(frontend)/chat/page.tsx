@@ -7,6 +7,7 @@ import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
 import 'katex/dist/katex.min.css'
+import { getWebLLMEngine } from '@/lib/webllm'
 
 interface SourceCitation {
   document: string
@@ -26,6 +27,7 @@ interface ChatMessageItem {
   id: string
   role: 'user' | 'assistant'
   content: string
+  mode?: 'quick' | 'deep'
   sources?: SourceCitation[]
   images?: CitedImage[]
   cached?: boolean
@@ -80,6 +82,11 @@ export default function ChatPage() {
   const [showFilters, setShowFilters] = useState(false)
   const [selectedImage, setSelectedImage] = useState<string | null>(null)
 
+  // Dual-Mode State
+  const [chatMode, setChatMode] = useState<'quick' | 'deep'>('quick')
+  const [webLlmProgress, setWebLlmProgress] = useState<string>('')
+  const [expandedSourcesId, setExpandedSourcesId] = useState<string | null>(null)
+
   // Voice States
   const [selectedVoice, setSelectedVoice] = useState<string>('auto')
   const [autoSpeak, setAutoSpeak] = useState<boolean>(true)
@@ -109,6 +116,9 @@ export default function ChatPage() {
 
     const savedAuto = localStorage.getItem('parsea_auto_speak')
     if (savedAuto !== null) setAutoSpeak(savedAuto === 'true')
+
+    const savedMode = localStorage.getItem('parsea_mode') as 'quick' | 'deep' | null
+    if (savedMode === 'quick' || savedMode === 'deep') setChatMode(savedMode)
   }, [])
 
   useEffect(() => {
@@ -123,6 +133,11 @@ export default function ChatPage() {
   const handleVoiceChange = (v: string) => {
     setSelectedVoice(v)
     localStorage.setItem('parsea_voice', v)
+  }
+
+  const handleModeChange = (mode: 'quick' | 'deep') => {
+    setChatMode(mode)
+    localStorage.setItem('parsea_mode', mode)
   }
 
   // Function to play queued audio chunks sequentially
@@ -394,23 +409,13 @@ export default function ChatPage() {
       id: assistantId,
       role: 'assistant',
       content: '',
+      mode: chatMode,
       timestamp: Date.now(),
     }
     const updatedMessages = [...messages, userMessage]
     setMessages([...updatedMessages, assistantMessage])
     setInputQuestion('')
     setIsStreaming(true)
-    setStreamStatus('Searching your notes...')
-
-    const filters = {
-      ...(branch.trim() ? { branch: branch.trim() } : {}),
-      ...(semester ? { semester: Number(semester) } : {}),
-      ...(subject.trim() ? { subject: subject.trim() } : {}),
-    }
-    const historyPayload = updatedMessages.slice(-10).map((m) => ({
-      role: m.role,
-      content: m.content,
-    }))
 
     const updateAssistant = (patch: Partial<ChatMessageItem>) => {
       setMessages((prev) =>
@@ -420,95 +425,172 @@ export default function ChatPage() {
       )
     }
 
-    try {
-      const response = await fetch('/api/chat/stream', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          question: trimmed,
-          conversationId: currentConvId,
-          history: historyPayload,
-          filters: Object.keys(filters).length > 0 ? filters : undefined,
-        }),
-      })
+    if (chatMode === 'quick') {
+      setStreamStatus('Initializing WebGPU AI...')
+      try {
+        const engine = await getWebLLMEngine((report) => {
+          setWebLlmProgress(report.text)
+          const pct = Math.round((report.progress || 0) * 100)
+          setStreamStatus(`Loading in-browser AI: ${pct}%`)
+        })
+        setWebLlmProgress('')
+        setStreamStatus('Generating quick spoken response...')
 
-      if (!response.ok || !response.body) {
-        throw new Error((await response.text()) || 'Failed to start the response stream.')
-      }
+        const completionStream = await engine.chat.completions.create({
+          messages: [
+            {
+              role: 'system',
+              content:
+                'You are a concise voice assistant for Parsea study desk. Give a direct 1-3 sentence spoken answer without bullet points, markdown headers, or citations.',
+            },
+            { role: 'user', content: trimmed },
+          ],
+          stream: true,
+          max_tokens: 250,
+        })
 
-      const reader = response.body.getReader()
-      const decoder = new TextDecoder()
-      let buffer = ''
-      let streamedContent = ''
+        let streamedContent = ''
+        for await (const chunk of completionStream) {
+          const delta = chunk.choices[0]?.delta?.content || ''
+          if (delta) {
+            streamedContent += delta
+            updateAssistant({ content: streamedContent })
 
-      const processEvent = (rawEvent: string) => {
-        const dataLine = rawEvent.split('\n').find((line) => line.startsWith('data:'))
-        if (!dataLine) return
-        const event = JSON.parse(dataLine.slice(5).trim())
+            if (autoSpeakRef.current) {
+              sentenceBufferRef.current += delta
+              const sentenceEndRegex = /([.?!।\n]+)/
+              const parts = sentenceBufferRef.current.split(sentenceEndRegex)
 
-        if (event.type === 'metadata') {
-          setStreamStatus('Writing your answer...')
-          updateAssistant({
-            sources: event.sources,
-            images: event.images,
-            cached: event.cached,
-            retrievalBypassed: event.retrievalBypassed,
-          })
-        } else if (event.type === 'token') {
-          const token = event.token || ''
-          streamedContent += token
-          updateAssistant({ content: streamedContent })
-
-          if (autoSpeakRef.current) {
-            sentenceBufferRef.current += token
-            const sentenceEndRegex = /([.?!।\n]+)/
-            const parts = sentenceBufferRef.current.split(sentenceEndRegex)
-
-            if (parts.length > 2) {
-              while (parts.length > 2) {
-                const sentence = (parts.shift()! + parts.shift()!).trim()
-                if (sentence) {
-                  queueSentenceAudio(sentence, selectedVoiceRef.current)
+              if (parts.length > 2) {
+                while (parts.length > 2) {
+                  const sentence = (parts.shift()! + parts.shift()!).trim()
+                  if (sentence) {
+                    queueSentenceAudio(sentence, selectedVoiceRef.current)
+                  }
                 }
+                sentenceBufferRef.current = parts.join('')
               }
-              sentenceBufferRef.current = parts.join('')
             }
           }
-        } else if (event.type === 'done') {
-          updateAssistant({
-            content: event.answer || streamedContent,
-            sources: event.sources,
-            images: event.images,
-            cached: event.cached,
-            retrievalBypassed: event.retrievalBypassed,
-            latencyMs: event.latencyMs,
-          })
-
-          if (autoSpeakRef.current && sentenceBufferRef.current.trim()) {
-            queueSentenceAudio(sentenceBufferRef.current.trim(), selectedVoiceRef.current)
-            sentenceBufferRef.current = ''
-          }
-        } else if (event.type === 'error') {
-          throw new Error(event.error || 'The AI response stream failed.')
         }
-      }
 
-      while (true) {
-        const { value, done } = await reader.read()
-        buffer += decoder.decode(value || new Uint8Array(), { stream: !done })
-        const events = buffer.split('\n\n')
-        buffer = events.pop() || ''
-        events.forEach(processEvent)
-        if (done) break
+        if (autoSpeakRef.current && sentenceBufferRef.current.trim()) {
+          queueSentenceAudio(sentenceBufferRef.current.trim(), selectedVoiceRef.current)
+          sentenceBufferRef.current = ''
+        }
+      } catch (err: any) {
+        console.error('WebLLM Error:', err)
+        updateAssistant({
+          content: `**Error:** ${err?.message || 'WebGPU initialization failed. Try switching to Deep Analysis mode.'}`,
+        })
+      } finally {
+        setIsStreaming(false)
+        setWebLlmProgress('')
+        setStreamStatus('Searching your notes...')
       }
-      if (buffer.trim()) processEvent(buffer)
-    } catch (err: any) {
-      updateAssistant({
-        content: `**Error:** ${err?.message || 'Failed to generate response. Please try again.'}`,
-      })
-    } finally {
-      setIsStreaming(false)
+    } else {
+      // Deep Analysis Mode (Server Nemotron RAG)
       setStreamStatus('Searching your notes...')
+      const filters = {
+        ...(branch.trim() ? { branch: branch.trim() } : {}),
+        ...(semester ? { semester: Number(semester) } : {}),
+        ...(subject.trim() ? { subject: subject.trim() } : {}),
+      }
+      const historyPayload = updatedMessages.slice(-10).map((m) => ({
+        role: m.role,
+        content: m.content,
+      }))
+
+      try {
+        const response = await fetch('/api/chat/stream', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            question: trimmed,
+            conversationId: currentConvId,
+            history: historyPayload,
+            filters: Object.keys(filters).length > 0 ? filters : undefined,
+          }),
+        })
+
+        if (!response.ok || !response.body) {
+          throw new Error((await response.text()) || 'Failed to start the response stream.')
+        }
+
+        const reader = response.body.getReader()
+        const decoder = new TextDecoder()
+        let buffer = ''
+        let streamedContent = ''
+
+        const processEvent = (rawEvent: string) => {
+          const dataLine = rawEvent.split('\n').find((line) => line.startsWith('data:'))
+          if (!dataLine) return
+          const event = JSON.parse(dataLine.slice(5).trim())
+
+          if (event.type === 'metadata') {
+            setStreamStatus('Writing your answer...')
+            updateAssistant({
+              sources: event.sources,
+              images: event.images,
+              cached: event.cached,
+              retrievalBypassed: event.retrievalBypassed,
+            })
+          } else if (event.type === 'token') {
+            const token = event.token || ''
+            streamedContent += token
+            updateAssistant({ content: streamedContent })
+
+            if (autoSpeakRef.current) {
+              sentenceBufferRef.current += token
+              const sentenceEndRegex = /([.?!।\n]+)/
+              const parts = sentenceBufferRef.current.split(sentenceEndRegex)
+
+              if (parts.length > 2) {
+                while (parts.length > 2) {
+                  const sentence = (parts.shift()! + parts.shift()!).trim()
+                  if (sentence) {
+                    queueSentenceAudio(sentence, selectedVoiceRef.current)
+                  }
+                }
+                sentenceBufferRef.current = parts.join('')
+              }
+            }
+          } else if (event.type === 'done') {
+            updateAssistant({
+              content: event.answer || streamedContent,
+              sources: event.sources,
+              images: event.images,
+              cached: event.cached,
+              retrievalBypassed: event.retrievalBypassed,
+              latencyMs: event.latencyMs,
+            })
+
+            if (autoSpeakRef.current && sentenceBufferRef.current.trim()) {
+              queueSentenceAudio(sentenceBufferRef.current.trim(), selectedVoiceRef.current)
+              sentenceBufferRef.current = ''
+            }
+          } else if (event.type === 'error') {
+            throw new Error(event.error || 'The AI response stream failed.')
+          }
+        }
+
+        while (true) {
+          const { value, done } = await reader.read()
+          buffer += decoder.decode(value || new Uint8Array(), { stream: !done })
+          const events = buffer.split('\n\n')
+          buffer = events.pop() || ''
+          events.forEach(processEvent)
+          if (done) break
+        }
+        if (buffer.trim()) processEvent(buffer)
+      } catch (err: any) {
+        updateAssistant({
+          content: `**Error:** ${err?.message || 'Failed to generate response. Please try again.'}`,
+        })
+      } finally {
+        setIsStreaming(false)
+        setStreamStatus('Searching your notes...')
+      }
     }
   }
 
@@ -581,8 +663,7 @@ export default function ChatPage() {
           <div className="chat-starters">
             <p className="chat-starters-title">Start an Academic Discussion</p>
             <p className="chat-starters-desc">
-              Ask anything about your study materials. Follow-up questions reuse cached context —
-              no extra database queries.
+              Ask anything about your study materials. Quick Chat runs in-browser via WebGPU, while Deep Analysis uses Nemotron RAG with citations.
             </p>
             <div className="chat-starters-chips">
               {STARTERS.map((s, i) => (
@@ -606,7 +687,7 @@ export default function ChatPage() {
             className={`chat-message-row chat-message-row--${msg.role}`}
           >
             <span className="chat-sender-label">
-              {msg.role === 'user' ? 'You' : 'Parsea'}
+              {msg.role === 'user' ? 'You' : msg.mode === 'quick' ? 'Parsea (WebGPU)' : 'Parsea'}
             </span>
 
             {msg.role === 'user' ? (
@@ -615,7 +696,9 @@ export default function ChatPage() {
               <div className="chat-card">
                 {/* Status badges */}
                 <div className="chat-card-header">
-                  <span className="chat-card-label">Response</span>
+                  <span className="chat-card-label">
+                    {msg.mode === 'quick' ? 'Quick Answer (WebGPU)' : 'Response'}
+                  </span>
                   <div className="chat-card-badges" style={{ alignItems: 'center' }}>
                     {/* TTS Speaker Button & Player */}
                     <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginRight: 6 }}>
@@ -669,6 +752,11 @@ export default function ChatPage() {
                       )}
                     </div>
 
+                    {msg.mode === 'quick' && (
+                      <span className="badge badge-purple badge-rounded" title="Processed directly in your browser via WebGPU">
+                        WebGPU
+                      </span>
+                    )}
                     {msg.retrievalBypassed && (
                       <span
                         className="badge badge-blue badge-rounded"
@@ -698,7 +786,7 @@ export default function ChatPage() {
                   </ReactMarkdown>
                 </div>
 
-                {/* Diagrams */}
+                {/* Diagrams (Deep Analysis Mode) */}
                 {msg.images && msg.images.length > 0 && (
                   <div className="chat-section">
                     <span className="chat-section-title">
@@ -721,34 +809,66 @@ export default function ChatPage() {
                   </div>
                 )}
 
-                {/* Sources */}
+                {/* Sources Pill / Grid */}
                 {msg.sources && msg.sources.length > 0 && (
                   <div className="chat-section">
-                    <span className="chat-section-title">Citations</span>
-                    <div className="chat-sources-grid">
-                      {msg.sources.map((s, i) => (
-                        <div key={i} className="chat-source-item">
-                          <div className="chat-source-info">
-                            <span className="chat-source-name">{s.document}</span>
-                            <span className="chat-source-detail">
-                              {s.chapter ? `${s.chapter} · ` : ''}
-                              <span className="chat-source-page">Page {s.page}</span>
-                            </span>
+                    {msg.mode === 'quick' ? (
+                      <div>
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-sm"
+                          style={{ fontSize: '0.75rem', padding: '2px 8px' }}
+                          onClick={() =>
+                            setExpandedSourcesId(expandedSourcesId === msg.id ? null : msg.id)
+                          }
+                        >
+                          Sources ({msg.sources.length}) {expandedSourcesId === msg.id ? '▲' : '▼'}
+                        </button>
+                        {expandedSourcesId === msg.id && (
+                          <div className="chat-sources-grid" style={{ marginTop: 8 }}>
+                            {msg.sources.map((s, i) => (
+                              <div key={i} className="chat-source-item">
+                                <div className="chat-source-info">
+                                  <span className="chat-source-name">{s.document}</span>
+                                  <span className="chat-source-detail">
+                                    {s.chapter ? `${s.chapter} · ` : ''}
+                                    <span className="chat-source-page">Page {s.page}</span>
+                                  </span>
+                                </div>
+                              </div>
+                            ))}
                           </div>
-                          {s.url && (
-                            <a
-                              href={s.url}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="btn btn-primary btn-sm"
-                              style={{ flexShrink: 0 }}
-                            >
-                              PDF ↗
-                            </a>
-                          )}
+                        )}
+                      </div>
+                    ) : (
+                      <>
+                        <span className="chat-section-title">Citations</span>
+                        <div className="chat-sources-grid">
+                          {msg.sources.map((s, i) => (
+                            <div key={i} className="chat-source-item">
+                              <div className="chat-source-info">
+                                <span className="chat-source-name">{s.document}</span>
+                                <span className="chat-source-detail">
+                                  {s.chapter ? `${s.chapter} · ` : ''}
+                                  <span className="chat-source-page">Page {s.page}</span>
+                                </span>
+                              </div>
+                              {s.url && (
+                                <a
+                                  href={s.url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="btn btn-primary btn-sm"
+                                  style={{ flexShrink: 0 }}
+                                >
+                                  PDF ↗
+                                </a>
+                              )}
+                            </div>
+                          ))}
                         </div>
-                      ))}
-                    </div>
+                      </>
+                    )}
                   </div>
                 )}
               </div>
@@ -802,6 +922,22 @@ export default function ChatPage() {
           </div>
         )}
 
+        {webLlmProgress && chatMode === 'quick' && (
+          <div
+            style={{
+              padding: '4px 10px',
+              marginBottom: '6px',
+              borderRadius: '6px',
+              backgroundColor: '#e3f2fd',
+              color: '#0288d1',
+              fontSize: '0.78rem',
+              fontWeight: 600,
+            }}
+          >
+            ⚡ {webLlmProgress}
+          </div>
+        )}
+
         <form onSubmit={handleSubmit} className="chat-input-inner">
           <button
             type="button"
@@ -812,6 +948,57 @@ export default function ChatPage() {
           >
             New chat
           </button>
+
+          {/* Dual-Mode Selector Segmented Switch */}
+          <div
+            style={{
+              display: 'inline-flex',
+              borderRadius: 8,
+              border: '1px solid var(--border-default, #ccc)',
+              overflow: 'hidden',
+              height: 38,
+              flexShrink: 0,
+            }}
+          >
+            <button
+              type="button"
+              onClick={() => handleModeChange('quick')}
+              title="In-Browser WebGPU • Fast Spoken Voice"
+              style={{
+                padding: '0 10px',
+                fontSize: '0.8rem',
+                fontWeight: 600,
+                border: 'none',
+                background: chatMode === 'quick' ? 'var(--color-primary, #0052cc)' : 'var(--bg-surface, #fff)',
+                color: chatMode === 'quick' ? '#fff' : 'var(--text-primary, #333)',
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 4,
+              }}
+            >
+              💬 Quick Chat
+            </button>
+            <button
+              type="button"
+              onClick={() => handleModeChange('deep')}
+              title="Server Nemotron RAG • Full Citations"
+              style={{
+                padding: '0 10px',
+                fontSize: '0.8rem',
+                fontWeight: 600,
+                border: 'none',
+                background: chatMode === 'deep' ? 'var(--color-primary, #0052cc)' : 'var(--bg-surface, #fff)',
+                color: chatMode === 'deep' ? '#fff' : 'var(--text-primary, #333)',
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 4,
+              }}
+            >
+              📑 Deep Analysis
+            </button>
+          </div>
 
           {/* Dynamic Voice Selector Dropdown */}
           <select
@@ -897,7 +1084,7 @@ export default function ChatPage() {
             placeholder={
               messages.length === 0
                 ? "Ask anything — e.g. 'explain pigeonhole principle with diagrams'…"
-                : "Ask a follow-up — reuses cached context, no extra DB query…"
+                : "Ask a follow-up…"
             }
             disabled={isPending || isTranscribing}
             style={{ flex: 1 }}
