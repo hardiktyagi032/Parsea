@@ -82,6 +82,8 @@ export default function ChatPage() {
 
   // Voice States
   const [selectedVoice, setSelectedVoice] = useState<string>('auto')
+  const [autoSpeak, setAutoSpeak] = useState<boolean>(true)
+  const [isAudioQueuePlaying, setIsAudioQueuePlaying] = useState<boolean>(false)
   const [isRecording, setIsRecording] = useState(false)
   const [isTranscribing, setIsTranscribing] = useState(false)
   const [voiceError, setVoiceError] = useState<string | null>(null)
@@ -93,14 +95,103 @@ export default function ChatPage() {
   const audioChunksRef = useRef<Blob[]>([])
   const audioElementRef = useRef<HTMLAudioElement | null>(null)
 
+  // Audio Queue & Sentence Buffer Refs
+  const audioQueueRef = useRef<string[]>([])
+  const isPlayingRef = useRef<boolean>(false)
+  const currentAudioRef = useRef<HTMLAudioElement | null>(null)
+  const sentenceBufferRef = useRef<string>('')
+  const autoSpeakRef = useRef<boolean>(true)
+  const selectedVoiceRef = useRef<string>('auto')
+
   useEffect(() => {
-    const saved = localStorage.getItem('parsea_voice')
-    if (saved) setSelectedVoice(saved)
+    const savedVoice = localStorage.getItem('parsea_voice')
+    if (savedVoice) setSelectedVoice(savedVoice)
+
+    const savedAuto = localStorage.getItem('parsea_auto_speak')
+    if (savedAuto !== null) setAutoSpeak(savedAuto === 'true')
   }, [])
+
+  useEffect(() => {
+    autoSpeakRef.current = autoSpeak
+    localStorage.setItem('parsea_auto_speak', String(autoSpeak))
+  }, [autoSpeak])
+
+  useEffect(() => {
+    selectedVoiceRef.current = selectedVoice
+  }, [selectedVoice])
 
   const handleVoiceChange = (v: string) => {
     setSelectedVoice(v)
     localStorage.setItem('parsea_voice', v)
+  }
+
+  // Function to play queued audio chunks sequentially
+  const playNextInQueue = () => {
+    if (audioQueueRef.current.length === 0) {
+      isPlayingRef.current = false
+      setIsAudioQueuePlaying(false)
+      return
+    }
+
+    isPlayingRef.current = true
+    setIsAudioQueuePlaying(true)
+    const nextAudioUrl = audioQueueRef.current.shift()!
+    const audio = new Audio(nextAudioUrl)
+    currentAudioRef.current = audio
+
+    audio.onended = () => {
+      URL.revokeObjectURL(nextAudioUrl)
+      playNextInQueue()
+    }
+
+    audio.onerror = () => {
+      URL.revokeObjectURL(nextAudioUrl)
+      playNextInQueue()
+    }
+
+    audio.play().catch((err) => {
+      console.warn('Audio autoplay blocked or failed:', err)
+      playNextInQueue()
+    })
+  }
+
+  // Function to fetch TTS for a complete sentence and push to queue
+  const queueSentenceAudio = async (sentenceText: string, voicePreset: string) => {
+    const clean = sentenceText.trim()
+    if (clean.length < 2) return
+
+    try {
+      const res = await fetch('/api/voice/tts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: clean, voice: voicePreset }),
+      })
+
+      if (!res.ok) return
+
+      const blob = await res.blob()
+      const audioUrl = URL.createObjectURL(blob)
+      audioQueueRef.current.push(audioUrl)
+
+      if (!isPlayingRef.current) {
+        playNextInQueue()
+      }
+    } catch (err) {
+      console.error('Failed to stream sentence TTS:', err)
+    }
+  }
+
+  // Cancel & flush function when user stops generation or submits a new query
+  const stopAllAudio = () => {
+    if (currentAudioRef.current) {
+      currentAudioRef.current.pause()
+      currentAudioRef.current = null
+    }
+    audioQueueRef.current.forEach((url) => URL.revokeObjectURL(url))
+    audioQueueRef.current = []
+    isPlayingRef.current = false
+    setIsAudioQueuePlaying(false)
+    sentenceBufferRef.current = ''
   }
 
   // Mic Recording (MediaRecorder STT)
@@ -125,7 +216,6 @@ export default function ChatPage() {
         stream.getTracks().forEach((track) => track.stop())
         const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' })
 
-        // Guard against empty or corrupted files (< 1000 bytes)
         if (audioBlob.size < 1000) {
           console.warn('Recorded audio is too short or empty.')
           return
@@ -190,6 +280,8 @@ export default function ChatPage() {
 
   // Text-to-Speech (TTS)
   const handlePlayTTS = async (msgId: string, text: string) => {
+    stopAllAudio()
+
     if (playingMessageId === msgId) {
       if (audioElementRef.current) {
         audioElementRef.current.pause()
@@ -271,6 +363,7 @@ export default function ChatPage() {
   }, [messages, isStreaming])
 
   const handleStartNewChat = () => {
+    stopAllAudio()
     const newId = crypto.randomUUID()
     sessionStorage.setItem('parsea_conversation_id', newId)
     setConversationId(newId)
@@ -281,6 +374,8 @@ export default function ChatPage() {
   const handleSendQuery = async (queryText: string) => {
     const trimmed = queryText.trim()
     if (!trimmed || isStreaming) return
+
+    stopAllAudio()
 
     const currentConvId = conversationId || crypto.randomUUID()
     if (!conversationId) {
@@ -360,8 +455,25 @@ export default function ChatPage() {
             retrievalBypassed: event.retrievalBypassed,
           })
         } else if (event.type === 'token') {
-          streamedContent += event.token || ''
+          const token = event.token || ''
+          streamedContent += token
           updateAssistant({ content: streamedContent })
+
+          if (autoSpeakRef.current) {
+            sentenceBufferRef.current += token
+            const sentenceEndRegex = /([.?!।\n]+)/
+            const parts = sentenceBufferRef.current.split(sentenceEndRegex)
+
+            if (parts.length > 2) {
+              while (parts.length > 2) {
+                const sentence = (parts.shift()! + parts.shift()!).trim()
+                if (sentence) {
+                  queueSentenceAudio(sentence, selectedVoiceRef.current)
+                }
+              }
+              sentenceBufferRef.current = parts.join('')
+            }
+          }
         } else if (event.type === 'done') {
           updateAssistant({
             content: event.answer || streamedContent,
@@ -371,6 +483,11 @@ export default function ChatPage() {
             retrievalBypassed: event.retrievalBypassed,
             latencyMs: event.latencyMs,
           })
+
+          if (autoSpeakRef.current && sentenceBufferRef.current.trim()) {
+            queueSentenceAudio(sentenceBufferRef.current.trim(), selectedVoiceRef.current)
+            sentenceBufferRef.current = ''
+          }
         } else if (event.type === 'error') {
           throw new Error(event.error || 'The AI response stream failed.')
         }
@@ -721,6 +838,56 @@ export default function ChatPage() {
               </option>
             ))}
           </select>
+
+          {/* Auto-Speak Toggle Button */}
+          <button
+            type="button"
+            onClick={() => setAutoSpeak(!autoSpeak)}
+            title={autoSpeak ? 'Auto-Speak enabled (streaming TTS)' : 'Auto-Speak disabled'}
+            style={{
+              flexShrink: 0,
+              height: 38,
+              padding: '0 10px',
+              borderRadius: 8,
+              border: autoSpeak ? '1px solid #2e7d32' : '1px solid var(--border-default, #ccc)',
+              background: autoSpeak ? '#e8f5e9' : 'var(--bg-surface, #fff)',
+              color: autoSpeak ? '#2e7d32' : 'var(--text-secondary, #666)',
+              cursor: 'pointer',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 4,
+              fontSize: '0.82rem',
+              fontWeight: 600,
+            }}
+          >
+            {autoSpeak ? <span>🔊 Auto-Speak On</span> : <span>🔇 Auto-Speak Off</span>}
+          </button>
+
+          {/* Stop Speaking Button when streaming audio queue is active */}
+          {isAudioQueuePlaying && (
+            <button
+              type="button"
+              onClick={stopAllAudio}
+              title="Stop playback and flush audio queue"
+              style={{
+                flexShrink: 0,
+                height: 38,
+                padding: '0 10px',
+                borderRadius: 8,
+                border: '1px solid #d32f2f',
+                background: '#ffebee',
+                color: '#d32f2f',
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 4,
+                fontSize: '0.82rem',
+                fontWeight: 600,
+              }}
+            >
+              ⏹️ Stop Speaking
+            </button>
+          )}
 
           <input
             type="text"
