@@ -14,6 +14,7 @@ import { Subjects } from './collections/Subjects'
 import { Documents } from './collections/Documents'
 import { DocumentPages } from './collections/DocumentPages'
 import { Chunks } from './collections/Chunks'
+import { Conversations } from './collections/Conversations'
 
 const filename = fileURLToPath(import.meta.url)
 const dirname = path.dirname(filename)
@@ -25,7 +26,7 @@ export default buildConfig({
       baseDir: path.resolve(dirname),
     },
   },
-  collections: [Users, Media, Colleges, Branches, Semesters, Subjects, Documents, DocumentPages, Chunks],
+  collections: [Users, Media, Colleges, Branches, Semesters, Subjects, Documents, DocumentPages, Chunks, Conversations],
   editor: lexicalEditor(),
   secret: process.env.PAYLOAD_SECRET || '',
   typescript: {

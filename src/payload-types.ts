@@ -76,6 +76,7 @@ export interface Config {
     documents: Document;
     document_pages: DocumentPage;
     chunks: Chunk;
+    conversations: Conversation;
     'payload-kv': PayloadKv;
     'payload-locked-documents': PayloadLockedDocument;
     'payload-preferences': PayloadPreference;
@@ -92,6 +93,7 @@ export interface Config {
     documents: DocumentsSelect<false> | DocumentsSelect<true>;
     document_pages: DocumentPagesSelect<false> | DocumentPagesSelect<true>;
     chunks: ChunksSelect<false> | ChunksSelect<true>;
+    conversations: ConversationsSelect<false> | ConversationsSelect<true>;
     'payload-kv': PayloadKvSelect<false> | PayloadKvSelect<true>;
     'payload-locked-documents': PayloadLockedDocumentsSelect<false> | PayloadLockedDocumentsSelect<true>;
     'payload-preferences': PayloadPreferencesSelect<false> | PayloadPreferencesSelect<true>;
@@ -142,6 +144,7 @@ export interface User {
    * Optional phone number for account recovery and study groups.
    */
   phoneNumber?: string | null;
+  role?: ('student' | 'admin') | null;
   semester?: number | null;
   updatedAt: string;
   createdAt: string;
@@ -293,6 +296,29 @@ export interface Chunk {
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "conversations".
+ */
+export interface Conversation {
+  id: number;
+  owner: number | User;
+  title: string;
+  subject?: string | null;
+  semester?: number | null;
+  messages:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  lastMessageAt?: string | null;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
  * via the `definition` "payload-kv".
  */
 export interface PayloadKv {
@@ -350,6 +376,10 @@ export interface PayloadLockedDocument {
     | ({
         relationTo: 'chunks';
         value: number | Chunk;
+      } | null)
+    | ({
+        relationTo: 'conversations';
+        value: number | Conversation;
       } | null);
   globalSlug?: string | null;
   user: {
@@ -400,6 +430,7 @@ export interface PayloadMigration {
 export interface UsersSelect<T extends boolean = true> {
   name?: T;
   phoneNumber?: T;
+  role?: T;
   semester?: T;
   updatedAt?: T;
   createdAt?: T;
@@ -527,6 +558,20 @@ export interface ChunksSelect<T extends boolean = true> {
   hasImage?: T;
   imageUrl?: T;
   imageCaption?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "conversations_select".
+ */
+export interface ConversationsSelect<T extends boolean = true> {
+  owner?: T;
+  title?: T;
+  subject?: T;
+  semester?: T;
+  messages?: T;
+  lastMessageAt?: T;
   updatedAt?: T;
   createdAt?: T;
 }
