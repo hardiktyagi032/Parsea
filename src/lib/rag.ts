@@ -35,6 +35,17 @@ export interface ChatMessage {
 export interface ConversationOptions {
   conversationId?: string
   history?: ChatMessage[]
+  targetLanguage?: 'auto' | 'en' | 'hi'
+}
+
+export function getLanguageInstruction(targetLanguage?: 'auto' | 'en' | 'hi'): string {
+  if (targetLanguage === 'hi') {
+    return 'CRITICAL INSTRUCTION: You MUST formulate your entire response strictly in standard Hindi (Devanagari script - हिन्दी), regardless of whether the user speaks or writes in English, Hinglish, or Hindi. Do not use Romanized Hindi.'
+  }
+  if (targetLanguage === 'en') {
+    return 'CRITICAL INSTRUCTION: You MUST formulate your entire response strictly in clear, natural English, regardless of whether the user speaks or writes in Hindi or Hinglish.'
+  }
+  return 'Respond in the primary language used by the user in their prompt.'
 }
 
 export interface SessionContext {
@@ -204,13 +215,14 @@ export async function askRAG(
     isElaborationQuery(trimmed)
   )
 
-  // Cache key includes question, filters, conversation turn, and bypass status
+  // Cache key includes question, filters, conversation turn, bypass status, and target output language
   const cacheKeyPayload = JSON.stringify({
     q: trimmed,
     f: filters || {},
     cid: conversationId || '',
     lastQ: activeSession?.lastQuestion || '',
     bypassed: canBypassRetrieval,
+    lang: options?.targetLanguage || 'auto',
   })
   const cacheKey = hashKey('rag:v3', cacheKeyPayload)
 
@@ -254,6 +266,8 @@ export async function askRAG(
         const prompt = PromptTemplate.fromTemplate(`
 You are an expert university lecturer and academic tutor. Your job is to EXPLAIN and TEACH — not to copy-paste text.
 
+{langInstruction}
+
 Using the study material context provided, compose a well-structured, insightful academic explanation that:
 - SYNTHESISES information across the retrieved chunks into a coherent explanation
 - EXPLAINS concepts in your own words as a knowledgeable teacher would
@@ -283,6 +297,7 @@ Use the study material context as supporting evidence when it is present and rel
             diagrams: activeSession.diagramsContext || '',
             history: historyContext,
             question: trimmed,
+            langInstruction: getLanguageInstruction(options?.targetLanguage),
           })
           answer = typeof response.content === 'string' ? response.content : JSON.stringify(response.content)
         } catch (llmError: any) {
@@ -529,6 +544,8 @@ Use the study material context as supporting evidence when it is present and rel
       const prompt = PromptTemplate.fromTemplate(`
 You are an expert university lecturer and academic tutor. Your job is to EXPLAIN and TEACH — not to copy-paste text.
 
+{langInstruction}
+
 Using the study material context provided, compose a well-structured, insightful academic explanation that:
 - SYNTHESISES information across the retrieved chunks into a coherent explanation
 - EXPLAINS concepts in your own words as a knowledgeable teacher would
@@ -558,6 +575,7 @@ Use the study material context as supporting evidence when it is present and rel
           diagrams: diagramsContext,
           history: historyContext,
           question: trimmed,
+          langInstruction: getLanguageInstruction(options?.targetLanguage),
         })
         answer = typeof response.content === 'string' ? response.content : JSON.stringify(response.content)
       } catch (llmError: any) {
@@ -651,6 +669,7 @@ export async function* askRAGStream(
     cid: conversationId || '',
     lastQ: activeSession?.lastQuestion || '',
     bypassed: canBypassRetrieval,
+    lang: options?.targetLanguage || 'auto',
   })
   const cacheKey = hashKey('rag:v3', cacheKeyPayload)
 
@@ -730,6 +749,8 @@ export async function* askRAGStream(
     const prompt = PromptTemplate.fromTemplate(`
 You are an expert university lecturer and academic tutor. Your job is to EXPLAIN and TEACH — not to copy-paste text.
 
+{langInstruction}
+
 Using the study material context provided, compose a well-structured, insightful academic explanation that:
 - SYNTHESISES information across the retrieved chunks into a coherent explanation
 - EXPLAINS concepts in your own words as a knowledgeable teacher would
@@ -759,6 +780,7 @@ Use the study material context as supporting evidence when it is present and rel
         diagrams: activeSession.diagramsContext || '',
         history: historyContext,
         question: trimmed,
+        langInstruction: getLanguageInstruction(options?.targetLanguage),
       })
 
       for await (const chunk of stream) {
@@ -1014,6 +1036,8 @@ Use the study material context as supporting evidence when it is present and rel
   const prompt = PromptTemplate.fromTemplate(`
 You are an expert university lecturer and academic tutor. Your job is to EXPLAIN and TEACH — not to copy-paste text.
 
+{langInstruction}
+
 Using the study material context provided, compose a well-structured, insightful academic explanation that:
 - SYNTHESISES information across the retrieved chunks into a coherent explanation
 - EXPLAINS concepts in your own words as a knowledgeable teacher would
@@ -1043,6 +1067,7 @@ Use the study material context as supporting evidence when it is present and rel
       diagrams: diagramsContext,
       history: historyContext,
       question: trimmed,
+      langInstruction: getLanguageInstruction(options?.targetLanguage),
     })
 
     for await (const chunk of stream) {

@@ -66,6 +66,12 @@ const VOICE_OPTIONS = [
   { id: 'en-US-JennyNeural', label: 'en-US-JennyNeural: English (US) - Female (Jenny)' },
 ]
 
+const LANG_OPTIONS: { id: 'auto' | 'en' | 'hi'; label: string; shortLabel: string }[] = [
+  { id: 'auto', label: 'Auto Detect (Matches input language)', shortLabel: 'Lang: Auto' },
+  { id: 'en', label: 'English (EN) - Forces English response', shortLabel: 'EN' },
+  { id: 'hi', label: 'हिन्दी (HI) - Forces Hindi response', shortLabel: 'HI' },
+]
+
 const STARTERS = [
   'Explain pigeonhole principle with theorem statement',
   'What is the difference between relation and function?',
@@ -90,11 +96,14 @@ export default function ChatPage() {
   // Popover UI State
   const [showModelPopover, setShowModelPopover] = useState(false)
   const [showVoicePopover, setShowVoicePopover] = useState(false)
+  const [showLangPopover, setShowLangPopover] = useState(false)
 
   const modelPopoverRef = useRef<HTMLDivElement | null>(null)
   const voicePopoverRef = useRef<HTMLDivElement | null>(null)
+  const langPopoverRef = useRef<HTMLDivElement | null>(null)
 
-  // Voice States
+  // Language & Voice States
+  const [outputLanguage, setOutputLanguage] = useState<'auto' | 'en' | 'hi'>('auto')
   const [selectedVoice, setSelectedVoice] = useState<string>('auto')
   const [autoSpeak, setAutoSpeak] = useState<boolean>(true)
   const [isAudioQueuePlaying, setIsAudioQueuePlaying] = useState<boolean>(false)
@@ -116,6 +125,7 @@ export default function ChatPage() {
   const sentenceBufferRef = useRef<string>('')
   const autoSpeakRef = useRef<boolean>(true)
   const selectedVoiceRef = useRef<string>('auto')
+  const outputLanguageRef = useRef<'auto' | 'en' | 'hi'>('auto')
 
   useEffect(() => {
     const savedVoice = localStorage.getItem('parsea_voice')
@@ -126,6 +136,9 @@ export default function ChatPage() {
 
     const savedMode = localStorage.getItem('parsea_mode') as 'quick' | 'deep' | null
     if (savedMode === 'quick' || savedMode === 'deep') setChatMode(savedMode)
+
+    const savedLang = localStorage.getItem('parsea_output_lang') as 'auto' | 'en' | 'hi' | null
+    if (savedLang === 'auto' || savedLang === 'en' || savedLang === 'hi') setOutputLanguage(savedLang)
   }, [])
 
   useEffect(() => {
@@ -135,6 +148,9 @@ export default function ChatPage() {
       }
       if (voicePopoverRef.current && !voicePopoverRef.current.contains(event.target as Node)) {
         setShowVoicePopover(false)
+      }
+      if (langPopoverRef.current && !langPopoverRef.current.contains(event.target as Node)) {
+        setShowLangPopover(false)
       }
     }
     document.addEventListener('mousedown', handleClickOutside)
@@ -152,6 +168,10 @@ export default function ChatPage() {
     selectedVoiceRef.current = selectedVoice
   }, [selectedVoice])
 
+  useEffect(() => {
+    outputLanguageRef.current = outputLanguage
+  }, [outputLanguage])
+
   const handleVoiceChange = (v: string) => {
     setSelectedVoice(v)
     localStorage.setItem('parsea_voice', v)
@@ -160,6 +180,11 @@ export default function ChatPage() {
   const handleModeChange = (mode: 'quick' | 'deep') => {
     setChatMode(mode)
     localStorage.setItem('parsea_mode', mode)
+  }
+
+  const handleLanguageChange = (lang: 'auto' | 'en' | 'hi') => {
+    setOutputLanguage(lang)
+    localStorage.setItem('parsea_output_lang', lang)
   }
 
   // Function to play queued audio chunks sequentially
@@ -201,7 +226,11 @@ export default function ChatPage() {
       const res = await fetch('/api/voice/tts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: clean, voice: voicePreset }),
+        body: JSON.stringify({
+          text: clean,
+          voice: voicePreset,
+          targetLanguage: outputLanguageRef.current,
+        }),
       })
 
       if (!res.ok) return
@@ -340,7 +369,11 @@ export default function ChatPage() {
       const res = await fetch('/api/voice/tts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text, voice: selectedVoice }),
+        body: JSON.stringify({
+          text,
+          voice: selectedVoice,
+          targetLanguage: outputLanguageRef.current,
+        }),
       })
 
       if (!res.ok) {
@@ -458,12 +491,22 @@ export default function ChatPage() {
         setWebLlmProgress('')
         setStreamStatus('Generating quick spoken response...')
 
+        let langInstruction = 'Respond in the primary language used by the user in their prompt.'
+        if (outputLanguageRef.current === 'hi') {
+          langInstruction =
+            'CRITICAL INSTRUCTION: You MUST formulate your entire response strictly in standard Hindi (Devanagari script - हिन्दी), regardless of whether the user speaks or writes in English, Hinglish, or Hindi. Do not use Romanized Hindi.'
+        } else if (outputLanguageRef.current === 'en') {
+          langInstruction =
+            'CRITICAL INSTRUCTION: You MUST formulate your entire response strictly in clear, natural English, regardless of whether the user speaks or writes in Hindi or Hinglish.'
+        }
+
         const completionStream = await engine.chat.completions.create({
           messages: [
             {
               role: 'system',
               content:
-                'You are a concise voice assistant for Parsea study desk. Give a direct 1-3 sentence spoken answer without bullet points, markdown headers, or citations.',
+                'You are a concise voice assistant for Parsea study desk. Give a direct 1-3 sentence spoken answer without bullet points, markdown headers, or citations. ' +
+                langInstruction,
             },
             { role: 'user', content: trimmed },
           ],
@@ -532,6 +575,7 @@ export default function ChatPage() {
             conversationId: currentConvId,
             history: historyPayload,
             filters: Object.keys(filters).length > 0 ? filters : undefined,
+            targetLanguage: outputLanguageRef.current,
           }),
         })
 
@@ -1025,7 +1069,7 @@ export default function ChatPage() {
               gap: 8,
             }}
           >
-            {/* Left Group (Model & Voice Pills) */}
+            {/* Left Group (Model, Language & Voice Pills) */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
               {/* Model Selector Pill */}
               <div className="relative" ref={modelPopoverRef} style={{ position: 'relative' }}>
@@ -1034,6 +1078,7 @@ export default function ChatPage() {
                   onClick={() => {
                     setShowModelPopover(!showModelPopover)
                     setShowVoicePopover(false)
+                    setShowLangPopover(false)
                   }}
                   className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-muted/60 hover:bg-muted text-foreground transition-colors"
                   style={{
@@ -1118,13 +1163,14 @@ export default function ChatPage() {
                 )}
               </div>
 
-              {/* Voice Settings Pill */}
-              <div className="relative" ref={voicePopoverRef} style={{ position: 'relative' }}>
+              {/* Language Selector Pill */}
+              <div className="relative" ref={langPopoverRef} style={{ position: 'relative' }}>
                 <button
                   type="button"
                   onClick={() => {
-                    setShowVoicePopover(!showVoicePopover)
+                    setShowLangPopover(!showLangPopover)
                     setShowModelPopover(false)
+                    setShowVoicePopover(false)
                   }}
                   className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-muted/60 hover:bg-muted text-foreground transition-colors"
                   style={{
@@ -1141,7 +1187,84 @@ export default function ChatPage() {
                     cursor: 'pointer',
                   }}
                 >
-                  <span>🎧 {voiceShortName}</span>
+                  <span>🌐 {outputLanguage === 'en' ? 'EN' : outputLanguage === 'hi' ? 'HI' : 'Lang: Auto'}</span>
+                  <span style={{ fontSize: '0.62rem', opacity: 0.7 }}>▾</span>
+                </button>
+
+                {showLangPopover && (
+                  <div
+                    style={{
+                      position: 'absolute',
+                      bottom: '100%',
+                      left: 0,
+                      marginBottom: 8,
+                      width: 250,
+                      padding: 8,
+                      background: 'var(--bg-surface, #ffffff)',
+                      borderRadius: 12,
+                      border: '1px solid var(--border-default, #e0e0e0)',
+                      boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
+                      zIndex: 50,
+                    }}
+                  >
+                    <div style={{ fontSize: '0.68rem', fontWeight: 700, color: '#888', textTransform: 'uppercase', letterSpacing: '0.5px', padding: '2px 6px 6px 6px' }}>
+                      Output Language
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                      {LANG_OPTIONS.map((l) => (
+                        <div
+                          key={l.id}
+                          onClick={() => {
+                            handleLanguageChange(l.id)
+                            setShowLangPopover(false)
+                          }}
+                          style={{
+                            padding: '6px 8px',
+                            borderRadius: 6,
+                            fontSize: '0.78rem',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            background: outputLanguage === l.id ? '#e3f2fd' : 'transparent',
+                            color: outputLanguage === l.id ? '#1976d2' : '#333',
+                            fontWeight: outputLanguage === l.id ? 600 : 400,
+                          }}
+                        >
+                          <span>{l.label}</span>
+                          {outputLanguage === l.id && <span>✓</span>}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Voice Settings Pill */}
+              <div className="relative" ref={voicePopoverRef} style={{ position: 'relative' }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowVoicePopover(!showVoicePopover)
+                    setShowModelPopover(false)
+                    setShowLangPopover(false)
+                  }}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-muted/60 hover:bg-muted text-foreground transition-colors"
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 5,
+                    padding: '3px 9px',
+                    borderRadius: 20,
+                    fontSize: '0.75rem',
+                    fontWeight: 600,
+                    background: 'var(--bg-muted, #f5f5f5)',
+                    color: 'var(--text-primary, #333)',
+                    border: '1px solid var(--border-default, #e0e0e0)',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <span>🎧 {selectedVoice === 'auto' ? 'Voice: Auto' : selectedVoice.includes('Swara') ? 'Hindi (Swara)' : selectedVoice.includes('Madhur') ? 'Hindi (Madhur)' : selectedVoice.includes('Neerja') ? 'English (Neerja)' : selectedVoice.includes('Prabhat') ? 'English (Prabhat)' : selectedVoice.includes('Jenny') ? 'English (Jenny)' : 'Voice'}</span>
                   <span style={{ fontSize: '0.62rem', opacity: 0.7 }}>▾</span>
                 </button>
 

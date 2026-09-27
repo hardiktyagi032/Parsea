@@ -36,7 +36,7 @@ export async function POST(req: Request) {
     }
 
     const body = await req.json()
-    const { text, voice = 'auto' } = body || {}
+    const { text, voice = 'auto', targetLanguage = 'auto' } = body || {}
 
     if (!text || !text.trim()) {
       return NextResponse.json({ error: 'Text is required for speech synthesis' }, { status: 400 })
@@ -47,8 +47,14 @@ export async function POST(req: Request) {
 
     let selectedVoice = voice
     if (selectedVoice === 'auto' || !selectedVoice) {
-      const isDevanagari = /[\u0900-\u097F]/.test(textToSynthesize)
-      selectedVoice = isDevanagari ? 'hi-IN-SwaraNeural' : 'en-IN-NeerjaNeural'
+      if (targetLanguage === 'hi') {
+        selectedVoice = 'hi-IN-SwaraNeural'
+      } else if (targetLanguage === 'en') {
+        selectedVoice = 'en-IN-NeerjaNeural'
+      } else {
+        const isDevanagari = /[\u0900-\u097F]/.test(textToSynthesize)
+        selectedVoice = isDevanagari ? 'hi-IN-SwaraNeural' : 'en-IN-NeerjaNeural'
+      }
     }
 
     const tts = new MsEdgeTTS()

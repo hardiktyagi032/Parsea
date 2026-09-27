@@ -4,7 +4,7 @@ export const dynamic = 'force-dynamic'
 
 export async function POST(req: Request) {
   try {
-    const { question, filters, conversationId, history } = await req.json()
+    const { question, filters, conversationId, history, targetLanguage } = await req.json()
 
     if (!question || !question.trim()) {
       return new Response(JSON.stringify({ error: 'Question is required' }), {
@@ -17,7 +17,7 @@ export async function POST(req: Request) {
     const customStream = new ReadableStream({
       async start(controller) {
         try {
-          for await (const event of askRAGStream(question, filters, { conversationId, history })) {
+          for await (const event of askRAGStream(question, filters, { conversationId, history, targetLanguage })) {
             controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`))
           }
         } catch (streamErr: any) {
