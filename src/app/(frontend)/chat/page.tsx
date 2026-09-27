@@ -92,9 +92,6 @@ export default function ChatPage() {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const audioChunksRef = useRef<Blob[]>([])
   const audioElementRef = useRef<HTMLAudioElement | null>(null)
-  const audioContextRef = useRef<AudioContext | null>(null)
-  const maxVolumeRef = useRef<number>(0)
-  const animFrameRef = useRef<number | null>(null)
 
   useEffect(() => {
     const saved = localStorage.getItem('parsea_voice')
@@ -106,46 +103,11 @@ export default function ChatPage() {
     localStorage.setItem('parsea_voice', v)
   }
 
-  // Mic Recording (MediaRecorder STT with Web Audio Volume Meter)
+  // Mic Recording (MediaRecorder STT)
   const startRecording = async () => {
     setVoiceError(null)
-    maxVolumeRef.current = 0
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-
-      // Web Audio API volume meter
-      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext
-      if (AudioCtx) {
-        const audioCtx = new AudioCtx()
-        audioContextRef.current = audioCtx
-        if (audioCtx.state === 'suspended') {
-          await audioCtx.resume()
-        }
-        const source = audioCtx.createMediaStreamSource(stream)
-        const analyser = audioCtx.createAnalyser()
-        analyser.fftSize = 256
-        source.connect(analyser)
-
-        const dataArray = new Uint8Array(analyser.frequencyBinCount)
-        const checkVolume = () => {
-          analyser.getByteFrequencyData(dataArray)
-          let sum = 0
-          for (let i = 0; i < dataArray.length; i++) {
-            sum += dataArray[i]
-          }
-          const avg = sum / dataArray.length
-          const normVolume = avg / 255
-          if (normVolume > maxVolumeRef.current) {
-            maxVolumeRef.current = normVolume
-          }
-          console.log('Peak Volume:', normVolume)
-          if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
-            animFrameRef.current = requestAnimationFrame(checkVolume)
-          }
-        }
-        checkVolume()
-      }
-
       const options =
         typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported('audio/webm')
           ? { mimeType: 'audio/webm' }
@@ -160,23 +122,12 @@ export default function ChatPage() {
       }
 
       mediaRecorderRef.current.onstop = async () => {
-        // Clean up Web Audio Context & mic stream hardware resources
-        if (animFrameRef.current) {
-          cancelAnimationFrame(animFrameRef.current)
-          animFrameRef.current = null
-        }
-        if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
-          audioContextRef.current.close().catch(() => {})
-          audioContextRef.current = null
-        }
         stream.getTracks().forEach((track) => track.stop())
-
         const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' })
 
-        // Check if mic detected sound (threshold 0.001) or if recording is too short
-        if (maxVolumeRef.current < 0.001 || audioBlob.size < 2000) {
-          console.warn('Microphone detected no sound or recording too short. Max volume:', maxVolumeRef.current)
-          setVoiceError('Microphone detected no sound. Please check your microphone input level.')
+        // Guard against empty or corrupted files (< 1000 bytes)
+        if (audioBlob.size < 1000) {
+          console.warn('Recorded audio is too short or empty.')
           return
         }
 
@@ -224,7 +175,7 @@ export default function ChatPage() {
       }
 
       if (data.isSilent || !data.text || !data.text.trim()) {
-        // Silent or hallucinated recording — do not modify input query
+        console.log('STT returned silence or empty text.')
         return
       }
 
