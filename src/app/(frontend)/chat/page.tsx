@@ -934,7 +934,7 @@ export default function ChatPage() {
       </div>
 
       {/* ── Sticky NotebookLM-style Input Card ───────────────────── */}
-      <div className="chat-input-bar" style={{ padding: '8px 16px' }}>
+      <div className="chat-input-bar max-w-3xl mx-auto w-full px-4 mb-3">
         {voiceError && (
           <div
             style={{
@@ -977,10 +977,10 @@ export default function ChatPage() {
             boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
           }}
         >
-          {/* Textarea on Top */}
+          {/* Textarea on Top (Compact single line, max 112px) */}
           <textarea
-            className="w-full bg-transparent border-none resize-none outline-none focus:ring-0 px-4 pt-3 pb-2 text-sm text-foreground placeholder:text-muted-foreground"
-            rows={2}
+            className="w-full bg-transparent border-none resize-none outline-none focus:ring-0 px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground min-h-[40px] max-h-28 overflow-y-auto"
+            rows={1}
             value={inputQuestion}
             onChange={(e) => setInputQuestion(e.target.value)}
             onKeyDown={(e) => {
@@ -1003,27 +1003,30 @@ export default function ChatPage() {
               border: 'none',
               resize: 'none',
               outline: 'none',
-              padding: '12px 16px 8px 16px',
-              fontSize: '0.9rem',
+              padding: '8px 12px',
+              fontSize: '0.88rem',
               color: 'var(--text-primary, #111)',
               fontFamily: 'inherit',
+              minHeight: '40px',
+              maxHeight: '112px',
+              overflowY: 'auto',
             }}
           />
 
           {/* Unified Bottom Action Bar */}
           <div
-            className="flex items-center justify-between px-3 py-2 border-t border-border/40"
+            className="flex items-center justify-between py-1.5 px-2.5 border-t border-border/40"
             style={{
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'space-between',
-              padding: '8px 12px',
+              padding: '6px 10px',
               borderTop: '1px solid var(--border-default, #f0f0f0)',
               gap: 8,
             }}
           >
             {/* Left Group (Model & Voice Pills) */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
               {/* Model Selector Pill */}
               <div className="relative" ref={modelPopoverRef} style={{ position: 'relative' }}>
                 <button
@@ -1036,10 +1039,10 @@ export default function ChatPage() {
                   style={{
                     display: 'inline-flex',
                     alignItems: 'center',
-                    gap: 6,
-                    padding: '4px 10px',
+                    gap: 5,
+                    padding: '3px 9px',
                     borderRadius: 20,
-                    fontSize: '0.78rem',
+                    fontSize: '0.75rem',
                     fontWeight: 600,
                     background: 'var(--bg-muted, #f5f5f5)',
                     color: 'var(--text-primary, #333)',
@@ -1048,7 +1051,7 @@ export default function ChatPage() {
                   }}
                 >
                   <span>{chatMode === 'quick' ? '⚡ Quick Chat' : '🧠 Deep Analysis'}</span>
-                  <span style={{ fontSize: '0.65rem', opacity: 0.7 }}>▾</span>
+                  <span style={{ fontSize: '0.62rem', opacity: 0.7 }}>▾</span>
                 </button>
 
                 {showModelPopover && (
@@ -1127,10 +1130,10 @@ export default function ChatPage() {
                   style={{
                     display: 'inline-flex',
                     alignItems: 'center',
-                    gap: 6,
-                    padding: '4px 10px',
+                    gap: 5,
+                    padding: '3px 9px',
                     borderRadius: 20,
-                    fontSize: '0.78rem',
+                    fontSize: '0.75rem',
                     fontWeight: 600,
                     background: 'var(--bg-muted, #f5f5f5)',
                     color: 'var(--text-primary, #333)',
@@ -1139,7 +1142,7 @@ export default function ChatPage() {
                   }}
                 >
                   <span>🎧 {voiceShortName}</span>
-                  <span style={{ fontSize: '0.65rem', opacity: 0.7 }}>▾</span>
+                  <span style={{ fontSize: '0.62rem', opacity: 0.7 }}>▾</span>
                 </button>
 
                 {showVoicePopover && (
@@ -1220,9 +1223,9 @@ export default function ChatPage() {
                     display: 'inline-flex',
                     alignItems: 'center',
                     gap: 4,
-                    padding: '4px 10px',
+                    padding: '3px 9px',
                     borderRadius: 20,
-                    fontSize: '0.78rem',
+                    fontSize: '0.75rem',
                     fontWeight: 600,
                     background: '#ffebee',
                     color: '#d32f2f',
@@ -1235,17 +1238,17 @@ export default function ChatPage() {
               )}
             </div>
 
-            {/* Right Group (Actions) */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            {/* Right Group (Actions: h-7 w-7 icons) */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
               {/* New Chat Button */}
               <button
                 type="button"
                 onClick={handleStartNewChat}
                 title="Start new conversation"
-                className="h-8 w-8 rounded-full flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                className="h-7 w-7 rounded-full flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
                 style={{
-                  width: 32,
-                  height: 32,
+                  width: 28,
+                  height: 28,
                   borderRadius: '50%',
                   display: 'inline-flex',
                   alignItems: 'center',
@@ -1253,7 +1256,7 @@ export default function ChatPage() {
                   border: 'none',
                   background: 'transparent',
                   cursor: 'pointer',
-                  fontSize: '0.9rem',
+                  fontSize: '0.8rem',
                 }}
               >
                 ➕
@@ -1265,12 +1268,12 @@ export default function ChatPage() {
                 onClick={toggleRecording}
                 disabled={isPending || isTranscribing}
                 title={isRecording ? 'Stop Recording' : 'Voice Input (Whisper STT)'}
-                className={`h-8 w-8 rounded-full flex items-center justify-center transition-all ${
+                className={`h-7 w-7 rounded-full flex items-center justify-center transition-all ${
                   isRecording ? 'bg-red-500/10 text-red-500 animate-pulse' : ''
                 }`}
                 style={{
-                  width: 32,
-                  height: 32,
+                  width: 28,
+                  height: 28,
                   borderRadius: '50%',
                   display: 'inline-flex',
                   alignItems: 'center',
@@ -1279,7 +1282,7 @@ export default function ChatPage() {
                   background: isRecording ? '#ffebee' : 'transparent',
                   color: isRecording ? '#d32f2f' : 'inherit',
                   cursor: 'pointer',
-                  fontSize: '0.9rem',
+                  fontSize: '0.8rem',
                 }}
               >
                 {isTranscribing ? <span>⏳</span> : isRecording ? <span>🔴</span> : <span>🎙️</span>}
@@ -1289,10 +1292,10 @@ export default function ChatPage() {
               <button
                 type="submit"
                 disabled={isPending || !inputQuestion.trim() || isTranscribing}
-                className="h-8 w-8 rounded-full bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-40 flex items-center justify-center transition-all cursor-pointer shadow-sm"
+                className="h-7 w-7 rounded-full bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-40 flex items-center justify-center transition-all cursor-pointer shadow-sm"
                 style={{
-                  width: 32,
-                  height: 32,
+                  width: 28,
+                  height: 28,
                   borderRadius: '50%',
                   display: 'inline-flex',
                   alignItems: 'center',
@@ -1302,6 +1305,7 @@ export default function ChatPage() {
                   color: '#ffffff',
                   cursor: isPending || !inputQuestion.trim() || isTranscribing ? 'not-allowed' : 'pointer',
                   opacity: isPending || !inputQuestion.trim() || isTranscribing ? 0.4 : 1,
+                  fontSize: '0.8rem',
                 }}
               >
                 {isPending ? <span className="btn-spinner" /> : <span>➔</span>}
