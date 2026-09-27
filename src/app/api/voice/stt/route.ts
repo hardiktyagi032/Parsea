@@ -1,6 +1,17 @@
 import { NextResponse } from 'next/server'
 import { Groq, toFile } from 'groq-sdk'
 
+const HALLUCINATION_ARTIFACTS = [
+  'thank you.',
+  'thank you',
+  'you',
+  'subtitles by',
+  'subtitles by...',
+  'thanks for watching',
+  'subscribe',
+  'amara.org',
+]
+
 export async function POST(req: Request) {
   try {
     const apiKey = process.env.GROQ_API_KEY
@@ -30,11 +41,24 @@ export async function POST(req: Request) {
     const transcription = await groq.audio.transcriptions.create({
       file,
       model: 'whisper-large-v3-turbo',
+      temperature: 0.0,
+      prompt: 'User speaking a clear query or question in English, Hindi, or Hinglish.',
       response_format: 'verbose_json',
     })
 
+    let text = (transcription.text || '').trim()
+    const lowerText = text.toLowerCase()
+
+    if (
+      HALLUCINATION_ARTIFACTS.some(
+        (artifact) => lowerText === artifact || lowerText.startsWith(artifact)
+      )
+    ) {
+      text = ''
+    }
+
     return NextResponse.json({
-      text: transcription.text || '',
+      text,
       language: (transcription as any).language || 'auto',
     })
   } catch (error: any) {

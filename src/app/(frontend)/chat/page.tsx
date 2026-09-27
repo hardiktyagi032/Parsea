@@ -108,11 +108,14 @@ export default function ChatPage() {
     setVoiceError(null)
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      mediaRecorderRef.current = new MediaRecorder(stream)
+      const options = typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported('audio/webm')
+        ? { mimeType: 'audio/webm' }
+        : undefined
+      mediaRecorderRef.current = new MediaRecorder(stream, options)
       audioChunksRef.current = []
 
       mediaRecorderRef.current.ondataavailable = (event) => {
-        if (event.data.size > 0) {
+        if (event.data && event.data.size > 0) {
           audioChunksRef.current.push(event.data)
         }
       }
@@ -120,6 +123,13 @@ export default function ChatPage() {
       mediaRecorderRef.current.onstop = async () => {
         const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' })
         stream.getTracks().forEach((track) => track.stop())
+
+        // Guard against empty or ultra-short recordings
+        if (audioBlob.size < 1000) {
+          console.warn('Recorded audio is too short or empty.')
+          return
+        }
+
         await processAudioTranscription(audioBlob)
       }
 
@@ -163,7 +173,13 @@ export default function ChatPage() {
         throw new Error(data.error || 'Speech transcription failed')
       }
 
-      if (data.text) {
+      const cleaned = data.text ? data.text.trim().toLowerCase() : ''
+      if (
+        data.text &&
+        !['thank you.', 'thank you', 'you', 'subtitles by', 'subtitles by...'].some(
+          (h) => cleaned === h || cleaned.startsWith(h)
+        )
+      ) {
         setInputQuestion(data.text)
       }
     } catch (err: any) {
