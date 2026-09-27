@@ -118,6 +118,9 @@ export default function ChatPage() {
       if (AudioCtx) {
         const audioCtx = new AudioCtx()
         audioContextRef.current = audioCtx
+        if (audioCtx.state === 'suspended') {
+          await audioCtx.resume()
+        }
         const source = audioCtx.createMediaStreamSource(stream)
         const analyser = audioCtx.createAnalyser()
         analyser.fftSize = 256
@@ -135,6 +138,7 @@ export default function ChatPage() {
           if (normVolume > maxVolumeRef.current) {
             maxVolumeRef.current = normVolume
           }
+          console.log('Peak Volume:', normVolume)
           if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
             animFrameRef.current = requestAnimationFrame(checkVolume)
           }
@@ -169,9 +173,9 @@ export default function ChatPage() {
 
         const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' })
 
-        // Check if mic detected sound or if recording is too short
-        if (maxVolumeRef.current < 0.01 || audioBlob.size < 2000) {
-          console.warn('Microphone detected no sound or recording too short.')
+        // Check if mic detected sound (threshold 0.001) or if recording is too short
+        if (maxVolumeRef.current < 0.001 || audioBlob.size < 2000) {
+          console.warn('Microphone detected no sound or recording too short. Max volume:', maxVolumeRef.current)
           setVoiceError('Microphone detected no sound. Please check your microphone input level.')
           return
         }
