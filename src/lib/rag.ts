@@ -224,10 +224,10 @@ export async function askRAG(
     cacheKey,
     async () => {
       const apiKey = process.env.NVIDIA_API_KEY
-      if (!apiKey) throw new Error('Please set NVIDIA_API_KEY in your .env file')
+      if (!apiKey || !apiKey.trim()) throw new Error('Error: Please set NVIDIA_API_KEY in your .env file')
 
       const llm = new ChatOpenAI({
-        modelName: process.env.NVIDIA_MODEL || 'nvidia/nemotron-3-ultra-550b-a55b',
+        modelName: process.env.NVIDIA_MODEL || 'nvidia/nemotron-3-ultra-550b',
         temperature: 0.2,
         apiKey,
         maxTokens: 16384,
@@ -688,13 +688,13 @@ export async function* askRAGStream(
   }
 
   const apiKey = process.env.NVIDIA_API_KEY
-  if (!apiKey) {
-    yield { type: 'error', error: 'Please set NVIDIA_API_KEY in your .env file' }
+  if (!apiKey || !apiKey.trim()) {
+    yield { type: 'error', error: 'Error: Please set NVIDIA_API_KEY in your .env file' }
     return
   }
 
   const llm = new ChatOpenAI({
-    modelName: process.env.NVIDIA_MODEL || 'nvidia/nemotron-3-ultra-550b-a55b',
+    modelName: process.env.NVIDIA_MODEL || 'nvidia/nemotron-3-ultra-550b',
     temperature: 0.2,
     apiKey,
     maxTokens: 16384,
