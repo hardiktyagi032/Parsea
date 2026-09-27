@@ -1,9 +1,18 @@
-﻿import { NextResponse } from 'next/server'
+import { NextResponse } from 'next/server'
 import { MsEdgeTTS, OUTPUT_FORMAT } from 'msedge-tts'
 
 export async function POST(req: Request) {
   try {
-    const { text, voice = 'auto' } = await req.json()
+    const apiKey = process.env.GROQ_API_KEY
+    if (!apiKey || !apiKey.trim()) {
+      return NextResponse.json(
+        { error: 'Error: Please set GROQ_API_KEY in your .env file' },
+        { status: 400 }
+      )
+    }
+
+    const body = await req.json()
+    const { text, voice = 'auto' } = body || {}
 
     if (!text || !text.trim()) {
       return NextResponse.json({ error: 'Text is required for speech synthesis' }, { status: 400 })

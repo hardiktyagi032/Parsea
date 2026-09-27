@@ -1,4 +1,4 @@
-﻿import { NextResponse } from 'next/server'
+import { NextResponse } from 'next/server'
 import { Groq, toFile } from 'groq-sdk'
 
 export async function POST(req: Request) {
@@ -22,9 +22,10 @@ export async function POST(req: Request) {
 
     const arrayBuffer = await audioFile.arrayBuffer()
     const buffer = Buffer.from(arrayBuffer)
-    const file = await toFile(buffer, audioFile.name || 'speech.webm', {
-      type: audioFile.type || 'audio/webm',
-    })
+    const fileName = audioFile.name || 'speech.webm'
+    const fileType = audioFile.type || 'audio/webm'
+
+    const file = await toFile(buffer, fileName, { type: fileType })
 
     const transcription = await groq.audio.transcriptions.create({
       file,

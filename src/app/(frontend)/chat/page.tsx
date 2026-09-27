@@ -48,7 +48,6 @@ function normalizeMath(text: string): string {
   )
 }
 
-
 const QUICK_FOLLOW_UPS = [
   'Explain with a concrete example',
   'Simplify this in easy terms',
@@ -56,14 +55,13 @@ const QUICK_FOLLOW_UPS = [
   'Summarise key takeaways in a table',
 ]
 
-
 const VOICE_OPTIONS = [
-  { id: 'auto', label: 'Auto (Hindi / English)' },
-  { id: 'hi-IN-SwaraNeural', label: 'Hindi - Swara (Female)' },
-  { id: 'hi-IN-MadhurNeural', label: 'Hindi - Madhur (Male)' },
-  { id: 'en-IN-NeerjaNeural', label: 'English (IN) - Neerja (Female)' },
-  { id: 'en-IN-PrabhatNeural', label: 'English (IN) - Prabhat (Male)' },
-  { id: 'en-US-JennyNeural', label: 'English (US) - Jenny (Female)' },
+  { id: 'auto', label: 'auto: Dynamic Detection (Hindi / English)' },
+  { id: 'hi-IN-SwaraNeural', label: 'hi-IN-SwaraNeural: Hindi (India) - Female (Swara)' },
+  { id: 'hi-IN-MadhurNeural', label: 'hi-IN-MadhurNeural: Hindi (India) - Male (Madhur)' },
+  { id: 'en-IN-NeerjaNeural', label: 'en-IN-NeerjaNeural: English (India) - Female (Neerja)' },
+  { id: 'en-IN-PrabhatNeural', label: 'en-IN-PrabhatNeural: English (India) - Male (Prabhat)' },
+  { id: 'en-US-JennyNeural', label: 'en-US-JennyNeural: English (US) - Female (Jenny)' },
 ]
 
 const STARTERS = [
@@ -82,7 +80,6 @@ export default function ChatPage() {
   const [showFilters, setShowFilters] = useState(false)
   const [selectedImage, setSelectedImage] = useState<string | null>(null)
 
-  
   // Voice States
   const [selectedVoice, setSelectedVoice] = useState<string>('auto')
   const [isRecording, setIsRecording] = useState(false)
@@ -90,6 +87,7 @@ export default function ChatPage() {
   const [voiceError, setVoiceError] = useState<string | null>(null)
   const [playingMessageId, setPlayingMessageId] = useState<string | null>(null)
   const [loadingTTSId, setLoadingTTSId] = useState<string | null>(null)
+  const [audioTime, setAudioTime] = useState<{ current: number; duration: number }>({ current: 0, duration: 0 })
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const audioChunksRef = useRef<Blob[]>([])
@@ -193,6 +191,7 @@ export default function ChatPage() {
     setLoadingTTSId(msgId)
     setPlayingMessageId(null)
     setVoiceError(null)
+    setAudioTime({ current: 0, duration: 0 })
 
     try {
       const res = await fetch('/api/voice/tts', {
@@ -211,6 +210,13 @@ export default function ChatPage() {
 
       const audio = new Audio(audioUrl)
       audioElementRef.current = audio
+
+      audio.ontimeupdate = () => {
+        setAudioTime({
+          current: audio.currentTime,
+          duration: audio.duration || 0,
+        })
+      }
 
       audio.onended = () => {
         setPlayingMessageId(null)
@@ -374,6 +380,7 @@ export default function ChatPage() {
       setStreamStatus('Searching your notes...')
     }
   }
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     handleSendQuery(inputQuestion)
@@ -479,36 +486,57 @@ export default function ChatPage() {
                 <div className="chat-card-header">
                   <span className="chat-card-label">Response</span>
                   <div className="chat-card-badges" style={{ alignItems: 'center' }}>
+                    {/* TTS Speaker Button & Player */}
+                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginRight: 6 }}>
+                      <button
+                        type="button"
+                        onClick={() => handlePlayTTS(msg.id, msg.content)}
+                        title={playingMessageId === msg.id ? 'Pause Voice' : 'Read aloud with Edge-TTS'}
+                        disabled={loadingTTSId === msg.id}
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 4,
+                          padding: '3px 8px',
+                          fontSize: '0.75rem',
+                          borderRadius: 6,
+                          border: '1px solid var(--border-default)',
+                          background: playingMessageId === msg.id ? 'var(--green-100)' : 'var(--bg-surface)',
+                          color: playingMessageId === msg.id ? 'var(--green-800)' : 'var(--text-primary)',
+                          cursor: 'pointer',
+                          fontWeight: 600,
+                        }}
+                      >
+                        {loadingTTSId === msg.id ? (
+                          <span>⏳ Synthesizing...</span>
+                        ) : playingMessageId === msg.id ? (
+                          <span>🔊 Pause ⏸️</span>
+                        ) : (
+                          <span>🔊 Listen</span>
+                        )}
+                      </button>
 
-                    {/* TTS Speaker Button */}
-                    <button
-                      type="button"
-                      onClick={() => handlePlayTTS(msg.id, msg.content)}
-                      title={playingMessageId === msg.id ? 'Pause Voice' : 'Read aloud with Edge-TTS'}
-                      disabled={loadingTTSId === msg.id}
-                      style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: 4,
-                        padding: '3px 8px',
-                        fontSize: '0.75rem',
-                        borderRadius: 6,
-                        border: '1px solid var(--border-default)',
-                        background: playingMessageId === msg.id ? 'var(--green-100)' : 'var(--bg-surface)',
-                        color: playingMessageId === msg.id ? 'var(--green-800)' : 'var(--text-primary)',
-                        cursor: 'pointer',
-                        fontWeight: 600,
-                        marginRight: 6,
-                      }}
-                    >
-                      {loadingTTSId === msg.id ? (
-                        <span>⏳ Synthesizing...</span>
-                      ) : playingMessageId === msg.id ? (
-                        <span>🔊 Pause ⏸️</span>
-                      ) : (
-                        <span>🔊 Listen</span>
+                      {playingMessageId === msg.id && audioTime.duration > 0 && (
+                        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: '0.75rem' }}>
+                          <input
+                            type="range"
+                            min={0}
+                            max={audioTime.duration}
+                            step={0.1}
+                            value={audioTime.current}
+                            onChange={(e) => {
+                              const val = Number(e.target.value)
+                              if (audioElementRef.current) audioElementRef.current.currentTime = val
+                              setAudioTime((prev) => ({ ...prev, current: val }))
+                            }}
+                            style={{ width: 80, height: 4, cursor: 'pointer' }}
+                          />
+                          <span className="text-muted" style={{ fontSize: '0.7rem' }}>
+                            {Math.floor(audioTime.current)}s / {Math.floor(audioTime.duration)}s
+                          </span>
+                        </div>
                       )}
-                    </button>
+                    </div>
 
                     {msg.retrievalBypassed && (
                       <span
@@ -627,6 +655,22 @@ export default function ChatPage() {
 
       {/* ── Sticky input bar ─────────────────────────────────────── */}
       <div className="chat-input-bar">
+        {voiceError && (
+          <div
+            style={{
+              padding: '6px 12px',
+              marginBottom: '8px',
+              borderRadius: '6px',
+              backgroundColor: '#ffebee',
+              color: '#c62828',
+              fontSize: '0.8rem',
+              fontWeight: 500,
+            }}
+          >
+            ⚠️ {voiceError}
+          </div>
+        )}
+
         <form onSubmit={handleSubmit} className="chat-input-inner">
           <button
             type="button"
@@ -637,6 +681,32 @@ export default function ChatPage() {
           >
             New chat
           </button>
+
+          {/* Dynamic Voice Selector Dropdown */}
+          <select
+            className="form-input voice-select"
+            value={selectedVoice}
+            onChange={(e) => handleVoiceChange(e.target.value)}
+            title="Select Voice Preset for TTS"
+            style={{
+              flexShrink: 0,
+              width: 'auto',
+              maxWidth: '190px',
+              fontSize: '0.82rem',
+              height: 38,
+              borderRadius: 8,
+              padding: '0 8px',
+              cursor: 'pointer',
+              background: 'var(--bg-surface, #fff)',
+              border: '1px solid var(--border-default, #ccc)',
+            }}
+          >
+            {VOICE_OPTIONS.map((v) => (
+              <option key={v.id} value={v.id}>
+                {v.label}
+              </option>
+            ))}
+          </select>
 
           <input
             type="text"
@@ -652,7 +722,6 @@ export default function ChatPage() {
             style={{ flex: 1 }}
           />
 
-          
           {/* Microphone Recording Toggle Button */}
           <button
             type="button"
