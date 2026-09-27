@@ -87,6 +87,13 @@ export default function ChatPage() {
   const [webLlmProgress, setWebLlmProgress] = useState<string>('')
   const [expandedSourcesId, setExpandedSourcesId] = useState<string | null>(null)
 
+  // Popover UI State
+  const [showModelPopover, setShowModelPopover] = useState(false)
+  const [showVoicePopover, setShowVoicePopover] = useState(false)
+
+  const modelPopoverRef = useRef<HTMLDivElement | null>(null)
+  const voicePopoverRef = useRef<HTMLDivElement | null>(null)
+
   // Voice States
   const [selectedVoice, setSelectedVoice] = useState<string>('auto')
   const [autoSpeak, setAutoSpeak] = useState<boolean>(true)
@@ -119,6 +126,21 @@ export default function ChatPage() {
 
     const savedMode = localStorage.getItem('parsea_mode') as 'quick' | 'deep' | null
     if (savedMode === 'quick' || savedMode === 'deep') setChatMode(savedMode)
+  }, [])
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (modelPopoverRef.current && !modelPopoverRef.current.contains(event.target as Node)) {
+        setShowModelPopover(false)
+      }
+      if (voicePopoverRef.current && !voicePopoverRef.current.contains(event.target as Node)) {
+        setShowVoicePopover(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+    }
   }, [])
 
   useEffect(() => {
@@ -603,6 +625,13 @@ export default function ChatPage() {
   const lastIsAssistant =
     !isPending && messages.length > 0 && messages[messages.length - 1].role === 'assistant'
 
+  const currentVoiceOption = VOICE_OPTIONS.find((v) => v.id === selectedVoice)
+  const voiceShortName = currentVoiceOption
+    ? currentVoiceOption.id === 'auto'
+      ? 'Auto (HI/EN)'
+      : currentVoiceOption.label.split(':')[0].replace(/hi-IN-|en-IN-|en-US-/, '')
+    : 'Voice'
+
   return (
     <div className="chat-shell">
       <LMSNavbar branch={branch} semester={semester || 3} />
@@ -904,8 +933,8 @@ export default function ChatPage() {
         <div ref={messagesEndRef} />
       </div>
 
-      {/* ── Sticky input bar ─────────────────────────────────────── */}
-      <div className="chat-input-bar">
+      {/* ── Sticky NotebookLM-style Input Card ───────────────────── */}
+      <div className="chat-input-bar" style={{ padding: '8px 16px' }}>
         {voiceError && (
           <div
             style={{
@@ -938,207 +967,347 @@ export default function ChatPage() {
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className="chat-input-inner">
-          <button
-            type="button"
-            className="btn btn-secondary btn-sm"
-            onClick={handleStartNewChat}
-            title="Start a new conversation thread"
-            style={{ flexShrink: 0 }}
-          >
-            New chat
-          </button>
-
-          {/* Dual-Mode Selector Segmented Switch */}
-          <div
-            style={{
-              display: 'inline-flex',
-              borderRadius: 8,
-              border: '1px solid var(--border-default, #ccc)',
-              overflow: 'hidden',
-              height: 38,
-              flexShrink: 0,
-            }}
-          >
-            <button
-              type="button"
-              onClick={() => handleModeChange('quick')}
-              title="In-Browser WebGPU • Fast Spoken Voice"
-              style={{
-                padding: '0 10px',
-                fontSize: '0.8rem',
-                fontWeight: 600,
-                border: 'none',
-                background: chatMode === 'quick' ? 'var(--color-primary, #0052cc)' : 'var(--bg-surface, #fff)',
-                color: chatMode === 'quick' ? '#fff' : 'var(--text-primary, #333)',
-                cursor: 'pointer',
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 4,
-              }}
-            >
-              💬 Quick Chat
-            </button>
-            <button
-              type="button"
-              onClick={() => handleModeChange('deep')}
-              title="Server Nemotron RAG • Full Citations"
-              style={{
-                padding: '0 10px',
-                fontSize: '0.8rem',
-                fontWeight: 600,
-                border: 'none',
-                background: chatMode === 'deep' ? 'var(--color-primary, #0052cc)' : 'var(--bg-surface, #fff)',
-                color: chatMode === 'deep' ? '#fff' : 'var(--text-primary, #333)',
-                cursor: 'pointer',
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 4,
-              }}
-            >
-              📑 Deep Analysis
-            </button>
-          </div>
-
-          {/* Dynamic Voice Selector Dropdown */}
-          <select
-            className="form-input voice-select"
-            value={selectedVoice}
-            onChange={(e) => handleVoiceChange(e.target.value)}
-            title="Select Voice Preset for TTS"
-            style={{
-              flexShrink: 0,
-              width: 'auto',
-              maxWidth: '190px',
-              fontSize: '0.82rem',
-              height: 38,
-              borderRadius: 8,
-              padding: '0 8px',
-              cursor: 'pointer',
-              background: 'var(--bg-surface, #fff)',
-              border: '1px solid var(--border-default, #ccc)',
-            }}
-          >
-            {VOICE_OPTIONS.map((v) => (
-              <option key={v.id} value={v.id}>
-                {v.label}
-              </option>
-            ))}
-          </select>
-
-          {/* Auto-Speak Toggle Button */}
-          <button
-            type="button"
-            onClick={() => setAutoSpeak(!autoSpeak)}
-            title={autoSpeak ? 'Auto-Speak enabled (streaming TTS)' : 'Auto-Speak disabled'}
-            style={{
-              flexShrink: 0,
-              height: 38,
-              padding: '0 10px',
-              borderRadius: 8,
-              border: autoSpeak ? '1px solid #2e7d32' : '1px solid var(--border-default, #ccc)',
-              background: autoSpeak ? '#e8f5e9' : 'var(--bg-surface, #fff)',
-              color: autoSpeak ? '#2e7d32' : 'var(--text-secondary, #666)',
-              cursor: 'pointer',
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 4,
-              fontSize: '0.82rem',
-              fontWeight: 600,
-            }}
-          >
-            {autoSpeak ? <span>🔊 Auto-Speak On</span> : <span>🔇 Auto-Speak Off</span>}
-          </button>
-
-          {/* Stop Speaking Button when streaming audio queue is active */}
-          {isAudioQueuePlaying && (
-            <button
-              type="button"
-              onClick={stopAllAudio}
-              title="Stop playback and flush audio queue"
-              style={{
-                flexShrink: 0,
-                height: 38,
-                padding: '0 10px',
-                borderRadius: 8,
-                border: '1px solid #d32f2f',
-                background: '#ffebee',
-                color: '#d32f2f',
-                cursor: 'pointer',
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 4,
-                fontSize: '0.82rem',
-                fontWeight: 600,
-              }}
-            >
-              ⏹️ Stop Speaking
-            </button>
-          )}
-
-          <input
-            type="text"
-            className="form-input"
+        <form
+          onSubmit={handleSubmit}
+          className="rounded-2xl border border-border/60 bg-background/95 shadow-sm backdrop-blur focus-within:ring-2 focus-within:ring-primary/20 transition-all overflow-visible relative"
+          style={{
+            background: 'var(--bg-surface, #ffffff)',
+            borderRadius: '16px',
+            border: '1px solid var(--border-default, #e0e0e0)',
+            boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
+          }}
+        >
+          {/* Textarea on Top */}
+          <textarea
+            className="w-full bg-transparent border-none resize-none outline-none focus:ring-0 px-4 pt-3 pb-2 text-sm text-foreground placeholder:text-muted-foreground"
+            rows={2}
             value={inputQuestion}
             onChange={(e) => setInputQuestion(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault()
+                if (inputQuestion.trim() && !isPending && !isTranscribing) {
+                  handleSendQuery(inputQuestion)
+                }
+              }
+            }}
             placeholder={
               messages.length === 0
                 ? "Ask anything — e.g. 'explain pigeonhole principle with diagrams'…"
                 : "Ask a follow-up…"
             }
             disabled={isPending || isTranscribing}
-            style={{ flex: 1 }}
+            style={{
+              width: '100%',
+              background: 'transparent',
+              border: 'none',
+              resize: 'none',
+              outline: 'none',
+              padding: '12px 16px 8px 16px',
+              fontSize: '0.9rem',
+              color: 'var(--text-primary, #111)',
+              fontFamily: 'inherit',
+            }}
           />
 
-          {/* Microphone Recording Toggle Button */}
-          <button
-            type="button"
-            onClick={toggleRecording}
-            disabled={isPending || isTranscribing}
-            title={isRecording ? 'Stop Recording' : 'Voice Input (Groq Whisper STT)'}
+          {/* Unified Bottom Action Bar */}
+          <div
+            className="flex items-center justify-between px-3 py-2 border-t border-border/40"
             style={{
-              flexShrink: 0,
-              padding: '0 12px',
-              height: 38,
-              borderRadius: 8,
-              border: isRecording ? '1px solid #ef5350' : '1px solid var(--border-default)',
-              background: isRecording ? '#ffebee' : 'var(--bg-surface)',
-              color: isRecording ? '#d32f2f' : 'var(--text-primary)',
-              cursor: 'pointer',
-              display: 'inline-flex',
+              display: 'flex',
               alignItems: 'center',
-              gap: 6,
-              fontSize: '0.85rem',
-              fontWeight: 600,
+              justifyContent: 'space-between',
+              padding: '8px 12px',
+              borderTop: '1px solid var(--border-default, #f0f0f0)',
+              gap: 8,
             }}
           >
-            {isTranscribing ? (
-              <span>⏳</span>
-            ) : isRecording ? (
-              <>
-                <span style={{ color: '#d32f2f' }}>🔴</span>
-                <span>Stop</span>
-              </>
-            ) : (
-              <span>🎙️</span>
-            )}
-          </button>
+            {/* Left Group (Model & Voice Pills) */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              {/* Model Selector Pill */}
+              <div className="relative" ref={modelPopoverRef} style={{ position: 'relative' }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowModelPopover(!showModelPopover)
+                    setShowVoicePopover(false)
+                  }}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-muted/60 hover:bg-muted text-foreground transition-colors"
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    padding: '4px 10px',
+                    borderRadius: 20,
+                    fontSize: '0.78rem',
+                    fontWeight: 600,
+                    background: 'var(--bg-muted, #f5f5f5)',
+                    color: 'var(--text-primary, #333)',
+                    border: '1px solid var(--border-default, #e0e0e0)',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <span>{chatMode === 'quick' ? '⚡ Quick Chat' : '🧠 Deep Analysis'}</span>
+                  <span style={{ fontSize: '0.65rem', opacity: 0.7 }}>▾</span>
+                </button>
 
-          <button
-            type="submit"
-            className="btn btn-primary"
-            disabled={isPending || !inputQuestion.trim() || isTranscribing}
-            style={{ flexShrink: 0 }}
-          >
-            {isPending ? (
-              <>
-                <span className="btn-spinner" />
-                Sending…
-              </>
-            ) : (
-              'Send →'
-            )}
-          </button>
+                {showModelPopover && (
+                  <div
+                    style={{
+                      position: 'absolute',
+                      bottom: '100%',
+                      left: 0,
+                      marginBottom: 8,
+                      width: 270,
+                      padding: 6,
+                      background: 'var(--bg-surface, #ffffff)',
+                      borderRadius: 12,
+                      border: '1px solid var(--border-default, #e0e0e0)',
+                      boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
+                      zIndex: 50,
+                    }}
+                  >
+                    <div
+                      onClick={() => {
+                        handleModeChange('quick')
+                        setShowModelPopover(false)
+                      }}
+                      style={{
+                        padding: '8px 10px',
+                        borderRadius: 8,
+                        cursor: 'pointer',
+                        background: chatMode === 'quick' ? '#e3f2fd' : 'transparent',
+                        border: chatMode === 'quick' ? '1px solid #90caf9' : '1px solid transparent',
+                        marginBottom: 4,
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.8rem', fontWeight: 600, color: '#111' }}>
+                        <span>⚡ Quick Chat</span>
+                        <span style={{ fontSize: '0.68rem', color: '#1976d2', fontFamily: 'monospace' }}>(WebGPU)</span>
+                      </div>
+                      <p style={{ fontSize: '0.72rem', color: '#666', marginTop: 2, margin: 0 }}>
+                        Fast conversational answers & in-browser WebGPU inference.
+                      </p>
+                    </div>
+
+                    <div
+                      onClick={() => {
+                        handleModeChange('deep')
+                        setShowModelPopover(false)
+                      }}
+                      style={{
+                        padding: '8px 10px',
+                        borderRadius: 8,
+                        cursor: 'pointer',
+                        background: chatMode === 'deep' ? '#e3f2fd' : 'transparent',
+                        border: chatMode === 'deep' ? '1px solid #90caf9' : '1px solid transparent',
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.8rem', fontWeight: 600, color: '#111' }}>
+                        <span>🧠 Deep Analysis</span>
+                        <span style={{ fontSize: '0.68rem', color: '#1976d2', fontFamily: 'monospace' }}>(Server RAG)</span>
+                      </div>
+                      <p style={{ fontSize: '0.72rem', color: '#666', marginTop: 2, margin: 0 }}>
+                        Full Nemotron RAG research, document citations & deep reasoning.
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Voice Settings Pill */}
+              <div className="relative" ref={voicePopoverRef} style={{ position: 'relative' }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowVoicePopover(!showVoicePopover)
+                    setShowModelPopover(false)
+                  }}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-muted/60 hover:bg-muted text-foreground transition-colors"
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    padding: '4px 10px',
+                    borderRadius: 20,
+                    fontSize: '0.78rem',
+                    fontWeight: 600,
+                    background: 'var(--bg-muted, #f5f5f5)',
+                    color: 'var(--text-primary, #333)',
+                    border: '1px solid var(--border-default, #e0e0e0)',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <span>🎧 {voiceShortName}</span>
+                  <span style={{ fontSize: '0.65rem', opacity: 0.7 }}>▾</span>
+                </button>
+
+                {showVoicePopover && (
+                  <div
+                    style={{
+                      position: 'absolute',
+                      bottom: '100%',
+                      left: 0,
+                      marginBottom: 8,
+                      width: 250,
+                      padding: 8,
+                      background: 'var(--bg-surface, #ffffff)',
+                      borderRadius: 12,
+                      border: '1px solid var(--border-default, #e0e0e0)',
+                      boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
+                      zIndex: 50,
+                    }}
+                  >
+                    <div style={{ fontSize: '0.68rem', fontWeight: 700, color: '#888', textTransform: 'uppercase', letterSpacing: '0.5px', padding: '2px 6px 6px 6px' }}>
+                      Voice Preset
+                    </div>
+                    <div style={{ maxHeight: 180, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 2 }}>
+                      {VOICE_OPTIONS.map((v) => (
+                        <div
+                          key={v.id}
+                          onClick={() => handleVoiceChange(v.id)}
+                          style={{
+                            padding: '6px 8px',
+                            borderRadius: 6,
+                            fontSize: '0.78rem',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            background: selectedVoice === v.id ? '#e3f2fd' : 'transparent',
+                            color: selectedVoice === v.id ? '#1976d2' : '#333',
+                            fontWeight: selectedVoice === v.id ? 600 : 400,
+                          }}
+                        >
+                          <span>{v.label.split(':')[1] || v.label}</span>
+                          {selectedVoice === v.id && <span>✓</span>}
+                        </div>
+                      ))}
+                    </div>
+
+                    <div style={{ margin: '8px 0', borderTop: '1px solid #eee' }} />
+
+                    {/* Auto-Speak Switch */}
+                    <div
+                      onClick={() => setAutoSpeak(!autoSpeak)}
+                      style={{
+                        padding: '6px 8px',
+                        borderRadius: 6,
+                        fontSize: '0.78rem',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        background: '#f9f9f9',
+                      }}
+                    >
+                      <span style={{ fontWeight: 600, color: '#333' }}>Auto-Speak Answers</span>
+                      <span style={{ color: autoSpeak ? '#2e7d32' : '#999', fontWeight: 700 }}>
+                        {autoSpeak ? 'ON' : 'OFF'}
+                      </span>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Stop Speaking Button */}
+              {isAudioQueuePlaying && (
+                <button
+                  type="button"
+                  onClick={stopAllAudio}
+                  title="Stop playback and flush audio queue"
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    padding: '4px 10px',
+                    borderRadius: 20,
+                    fontSize: '0.78rem',
+                    fontWeight: 600,
+                    background: '#ffebee',
+                    color: '#d32f2f',
+                    border: '1px solid #ef5350',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <span>⏹️ Stop</span>
+                </button>
+              )}
+            </div>
+
+            {/* Right Group (Actions) */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              {/* New Chat Button */}
+              <button
+                type="button"
+                onClick={handleStartNewChat}
+                title="Start new conversation"
+                className="h-8 w-8 rounded-full flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                style={{
+                  width: 32,
+                  height: 32,
+                  borderRadius: '50%',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  border: 'none',
+                  background: 'transparent',
+                  cursor: 'pointer',
+                  fontSize: '0.9rem',
+                }}
+              >
+                ➕
+              </button>
+
+              {/* Microphone Button */}
+              <button
+                type="button"
+                onClick={toggleRecording}
+                disabled={isPending || isTranscribing}
+                title={isRecording ? 'Stop Recording' : 'Voice Input (Whisper STT)'}
+                className={`h-8 w-8 rounded-full flex items-center justify-center transition-all ${
+                  isRecording ? 'bg-red-500/10 text-red-500 animate-pulse' : ''
+                }`}
+                style={{
+                  width: 32,
+                  height: 32,
+                  borderRadius: '50%',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  border: isRecording ? '1px solid #ef5350' : 'none',
+                  background: isRecording ? '#ffebee' : 'transparent',
+                  color: isRecording ? '#d32f2f' : 'inherit',
+                  cursor: 'pointer',
+                  fontSize: '0.9rem',
+                }}
+              >
+                {isTranscribing ? <span>⏳</span> : isRecording ? <span>🔴</span> : <span>🎙️</span>}
+              </button>
+
+              {/* Send Button */}
+              <button
+                type="submit"
+                disabled={isPending || !inputQuestion.trim() || isTranscribing}
+                className="h-8 w-8 rounded-full bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-40 flex items-center justify-center transition-all cursor-pointer shadow-sm"
+                style={{
+                  width: 32,
+                  height: 32,
+                  borderRadius: '50%',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  border: 'none',
+                  background: 'var(--color-primary, #0052cc)',
+                  color: '#ffffff',
+                  cursor: isPending || !inputQuestion.trim() || isTranscribing ? 'not-allowed' : 'pointer',
+                  opacity: isPending || !inputQuestion.trim() || isTranscribing ? 0.4 : 1,
+                }}
+              >
+                {isPending ? <span className="btn-spinner" /> : <span>➔</span>}
+              </button>
+            </div>
+          </div>
         </form>
       </div>
 
