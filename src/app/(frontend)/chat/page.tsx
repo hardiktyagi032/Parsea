@@ -1106,7 +1106,7 @@ export default function ChatPage() {
                     >
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.8rem', fontWeight: 600, color: '#111' }}>
                         <span>⚡ Quick Chat</span>
-                        <span style={{ fontSize: '0.68rem', color: '#1976d2', fontFamily: 'monospace' }}>(Groq 8B)</span>
+                        <span style={{ fontSize: '0.68rem', color: '#1976d2', fontFamily: 'monospace' }}>(Groq AI)</span>
                       </div>
                       <p style={{ fontSize: '0.72rem', color: '#666', marginTop: 2, margin: 0 }}>
                         Blazing-fast conversational answers & instant voice synthesis.

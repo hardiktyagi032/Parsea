@@ -17,7 +17,7 @@ export async function POST(req: Request) {
     } = body || {}
 
     // -------------------------------------------------------------
-    // MODE 1: QUICK CHAT (Blazing Fast Groq Llama-3.1-8B-Instant)
+    // MODE 1: QUICK CHAT (Blazing Fast Groq openai/gpt-oss-20b)
     // -------------------------------------------------------------
     if (mode === 'quick') {
       const groqKey = process.env.GROQ_API_KEY
@@ -53,7 +53,7 @@ ${langInstruction}`
       ]
 
       const stream = await groq.chat.completions.create({
-        model: 'llama-3.1-8b-instant',
+        model: 'openai/gpt-oss-20b',
         messages: conversation as any,
         temperature: 0.3,
         max_tokens: 300,
