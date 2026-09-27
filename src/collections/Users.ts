@@ -20,6 +20,16 @@ export const Users: CollectionConfig = {
       },
     },
     {
+      name: 'role',
+      type: 'select',
+      defaultValue: 'student',
+      options: [
+        { label: 'Student', value: 'student' },
+        { label: 'Admin', value: 'admin' },
+      ],
+      admin: { position: 'sidebar' },
+    },
+    {
       name: 'semester',
       type: 'number',
       min: 1,

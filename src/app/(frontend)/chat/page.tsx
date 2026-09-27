@@ -22,6 +22,21 @@ interface CitedImage {
   document: string
 }
 
+interface ConversationSummary {
+  id: string | number
+  title: string
+  subject?: string
+  semester?: number
+  messages?: ChatMessageItem[]
+  lastMessageAt?: string
+}
+
+interface ChatUser {
+  id: string | number
+  name?: string
+  email?: string
+}
+
 interface ChatMessageItem {
   id: string
   role: 'user' | 'assistant'
@@ -71,20 +86,55 @@ export default function ChatPage() {
   const [subject, setSubject] = useState('Discrete Mathematics')
   const [showFilters, setShowFilters] = useState(false)
   const [selectedImage, setSelectedImage] = useState<string | null>(null)
+  const [chatUser, setChatUser] = useState<ChatUser | null>(null)
+  const [conversations, setConversations] = useState<ConversationSummary[]>([])
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const [historyLoading, setHistoryLoading] = useState(true)
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const [isStreaming, setIsStreaming] = useState(false)
   const [streamStatus, setStreamStatus] = useState('Searching your notes...')
 
   useEffect(() => {
-    const savedId = sessionStorage.getItem('parsea_conversation_id')
-    if (savedId) {
-      setConversationId(savedId)
-    } else {
-      const newId = crypto.randomUUID()
-      sessionStorage.setItem('parsea_conversation_id', newId)
-      setConversationId(newId)
+    let active = true
+    const loadChatWorkspace = async () => {
+      try {
+        const meResponse = await fetch('/api/users/me', { credentials: 'include' })
+        const meData = meResponse.ok ? await meResponse.json() : null
+        if (!active) return
+        const user = meData?.user ? { id: meData.user.id, name: meData.user.name, email: meData.user.email } : null
+        setChatUser(user)
+        if (!user) {
+          const savedId = sessionStorage.getItem('parsea_conversation_id')
+          if (savedId) setConversationId(savedId)
+          else setConversationId(crypto.randomUUID())
+          return
+        }
+        const historyResponse = await fetch('/api/conversations', { credentials: 'include' })
+        const historyData = historyResponse.ok ? await historyResponse.json() : { conversations: [] }
+        if (!active) return
+        const savedConversations = historyData.conversations || []
+        setConversations(savedConversations)
+        const savedId = sessionStorage.getItem('parsea_conversation_id')
+        if (savedId) {
+          const saved = savedConversations.find((item: ConversationSummary) => String(item.id) === savedId)
+          if (saved) {
+            const detailResponse = await fetch(`/api/conversations/${saved.id}`, { credentials: 'include' })
+            const detail = detailResponse.ok ? await detailResponse.json() : null
+            if (active && detail?.conversation) {
+              setConversationId(String(detail.conversation.id))
+              setMessages(detail.conversation.messages || [])
+            }
+          }
+        }
+      } catch {
+        if (active) setConversations([])
+      } finally {
+        if (active) setHistoryLoading(false)
+      }
     }
+    loadChatWorkspace()
+    return () => { active = false }
   }, [])
 
   useEffect(() => {
@@ -92,22 +142,49 @@ export default function ChatPage() {
   }, [messages, isStreaming])
 
   const handleStartNewChat = () => {
-    const newId = crypto.randomUUID()
-    sessionStorage.setItem('parsea_conversation_id', newId)
-    setConversationId(newId)
+    sessionStorage.removeItem('parsea_conversation_id')
+    setConversationId('')
     setMessages([])
     setInputQuestion('')
+    setHistoryOpen(false)
+  }
+
+  const handleLoadConversation = async (id: string | number) => {
+    if (isStreaming) return
+    const response = await fetch(`/api/conversations/${id}`, { credentials: 'include' })
+    if (!response.ok) return
+    const data = await response.json()
+    const conversation = data.conversation
+    setConversationId(String(conversation.id))
+    sessionStorage.setItem('parsea_conversation_id', String(conversation.id))
+    setMessages(conversation.messages || [])
+    setHistoryOpen(false)
+  }
+
+  const handleDeleteConversation = async (id: string | number) => {
+    const response = await fetch(`/api/conversations/${id}`, { method: 'DELETE', credentials: 'include' })
+    if (!response.ok) return
+    setConversations((items) => items.filter((item) => String(item.id) !== String(id)))
+    if (String(id) === conversationId) handleStartNewChat()
+  }
+
+  const persistConversation = async (id: string, nextMessages: ChatMessageItem[], title: string) => {
+    if (!chatUser || !id) return
+    const response = await fetch(`/api/conversations/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ title, messages: nextMessages }),
+    })
+    if (response.ok) {
+      const data = await response.json()
+      setConversations((items) => [data.conversation, ...items.filter((item) => String(item.id) !== id)])
+    }
   }
 
   const handleSendQuery = async (queryText: string) => {
     const trimmed = queryText.trim()
     if (!trimmed || isStreaming) return
-
-    const currentConvId = conversationId || crypto.randomUUID()
-    if (!conversationId) {
-      setConversationId(currentConvId)
-      sessionStorage.setItem('parsea_conversation_id', currentConvId)
-    }
 
     const userMessage: ChatMessageItem = {
       id: crypto.randomUUID(),
@@ -115,6 +192,28 @@ export default function ChatPage() {
       content: trimmed,
       timestamp: Date.now(),
     }
+    let currentConvId = conversationId
+    let persistedConversation = Boolean(chatUser && conversationId && !conversationId.includes('-'))
+    if (!currentConvId && chatUser) {
+      const createResponse = await fetch('/api/conversations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ title: trimmed, subject, semester, messages: [userMessage] }),
+      })
+      if (createResponse.ok) {
+        const createData = await createResponse.json()
+        currentConvId = String(createData.conversation.id)
+        persistedConversation = true
+        setConversations((items) => [createData.conversation, ...items])
+      }
+    }
+    if (!currentConvId) currentConvId = crypto.randomUUID()
+    if (!conversationId) {
+      setConversationId(currentConvId)
+      sessionStorage.setItem('parsea_conversation_id', currentConvId)
+    }
+
     const assistantId = crypto.randomUUID()
     const assistantMessage: ChatMessageItem = {
       id: assistantId,
@@ -166,6 +265,7 @@ export default function ChatPage() {
       const decoder = new TextDecoder()
       let buffer = ''
       let streamedContent = ''
+      let completedAssistant: ChatMessageItem | null = null
 
       const processEvent = (rawEvent: string) => {
         const dataLine = rawEvent.split('\n').find((line) => line.startsWith('data:'))
@@ -184,14 +284,16 @@ export default function ChatPage() {
           streamedContent += event.token || ''
           updateAssistant({ content: streamedContent })
         } else if (event.type === 'done') {
-          updateAssistant({
+          completedAssistant = {
+            ...assistantMessage,
             content: event.answer || streamedContent,
             sources: event.sources,
             images: event.images,
             cached: event.cached,
             retrievalBypassed: event.retrievalBypassed,
             latencyMs: event.latencyMs,
-          })
+          }
+          updateAssistant(completedAssistant)
         } else if (event.type === 'error') {
           throw new Error(event.error || 'The AI response stream failed.')
         }
@@ -206,6 +308,9 @@ export default function ChatPage() {
         if (done) break
       }
       if (buffer.trim()) processEvent(buffer)
+      if (persistedConversation && completedAssistant) {
+        await persistConversation(currentConvId, [...updatedMessages, completedAssistant], trimmed)
+      }
     } catch (err: any) {
       updateAssistant({
         content: `**Error:** ${err?.message || 'Failed to generate response. Please try again.'}`,
@@ -227,6 +332,44 @@ export default function ChatPage() {
   return (
     <div className="chat-shell">
       <LMSNavbar branch={branch} semester={semester || 3} />
+
+      <div className="chat-workspace">
+        <aside className={`chat-history-sidebar${historyOpen ? ' is-open' : ''}`}>
+          <div className="chat-sidebar-head">
+            <div>
+              <span className="chat-sidebar-kicker">PARSEA</span>
+              <h2>Conversations</h2>
+            </div>
+            <button type="button" className="chat-sidebar-close" onClick={() => setHistoryOpen(false)} aria-label="Close chat history">×</button>
+          </div>
+          <button type="button" className="chat-new-button" onClick={handleStartNewChat}>
+            <span aria-hidden="true">+</span> New chat
+          </button>
+          {chatUser ? (
+            <div className="chat-history-list">
+              <span className="chat-history-label">Recent</span>
+              {historyLoading ? <p className="chat-history-empty">Loading history...</p> : conversations.length === 0 ? <p className="chat-history-empty">Your saved conversations will appear here.</p> : conversations.map((conversation) => (
+                <div key={conversation.id} className={`chat-history-item${String(conversation.id) === conversationId ? ' active' : ''}`}>
+                  <button type="button" className="chat-history-open" onClick={() => handleLoadConversation(conversation.id)}>
+                    <span className="chat-history-icon" aria-hidden="true">◌</span>
+                    <span className="chat-history-title">{conversation.title}</span>
+                  </button>
+                  <button type="button" className="chat-history-delete" onClick={() => handleDeleteConversation(conversation.id)} aria-label={`Delete ${conversation.title}`}>×</button>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="chat-history-signin">
+              <p>Sign in to save conversations and continue them on another device.</p>
+              <a href="/login">Sign in</a>
+            </div>
+          )}
+        </aside>
+        {historyOpen && <button type="button" className="chat-sidebar-backdrop" onClick={() => setHistoryOpen(false)} aria-label="Close chat history" />}
+        <div className="chat-main">
+          <button type="button" className="chat-history-toggle" onClick={() => setHistoryOpen(true)} aria-label="Open chat history">
+            <span aria-hidden="true">☰</span> History
+          </button>
 
       {/* Message feed */}
       <div className="chat-body">
@@ -489,6 +632,8 @@ export default function ChatPage() {
           </div>
         </div>
       )}
+        </div>
+      </div>
     </div>
   )
 }
