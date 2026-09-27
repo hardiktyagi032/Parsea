@@ -1,71 +1,65 @@
-import { NextResponse } from 'next/server'
-import { Groq, toFile } from 'groq-sdk'
+import { NextRequest, NextResponse } from "next/server"
+import { Groq, toFile } from "groq-sdk"
 
-const HALLUCINATION_ARTIFACTS = [
-  'thank you.',
-  'thank you',
-  'you',
-  'subtitles by',
-  'subtitles by...',
-  'thanks for watching',
-  'subscribe',
-  'amara.org',
-]
+export async function POST(req: NextRequest) {
+  const apiKey = process.env.GROQ_API_KEY
+  if (!apiKey || !apiKey.trim()) {
+    return NextResponse.json({ error: "Error: Please set GROQ_API_KEY in your .env file" }, { status: 500 })
+  }
 
-export async function POST(req: Request) {
   try {
-    const apiKey = process.env.GROQ_API_KEY
-    if (!apiKey || !apiKey.trim()) {
-      return NextResponse.json(
-        { error: 'Error: Please set GROQ_API_KEY in your .env file' },
-        { status: 400 }
-      )
-    }
-
     const formData = await req.formData()
-    const audioFile = (formData.get('file') || formData.get('audio')) as File | null
+    const fileObj = (formData.get("file") || formData.get("audio")) as File | null
 
-    if (!audioFile) {
-      return NextResponse.json({ error: 'No audio file provided' }, { status: 400 })
+    if (!fileObj || fileObj.size < 2000) {
+      return NextResponse.json({ text: "", error: "No audio recorded" })
     }
 
     const groq = new Groq({ apiKey })
-
-    const arrayBuffer = await audioFile.arrayBuffer()
+    const arrayBuffer = await fileObj.arrayBuffer()
     const buffer = Buffer.from(arrayBuffer)
-    const fileName = audioFile.name || 'speech.webm'
-    const fileType = audioFile.type || 'audio/webm'
+    const fileName = fileObj.name || "speech.webm"
+    const fileType = fileObj.type || "audio/webm"
 
     const file = await toFile(buffer, fileName, { type: fileType })
 
-    const transcription = await groq.audio.transcriptions.create({
-      file,
-      model: 'whisper-large-v3-turbo',
+    const transcription: any = await groq.audio.transcriptions.create({
+      file: file,
+      model: "whisper-large-v3-turbo",
+      response_format: "verbose_json",
       temperature: 0.0,
-      prompt: 'User speaking a clear query or question in English, Hindi, or Hinglish.',
-      response_format: 'verbose_json',
     })
 
-    let text = (transcription.text || '').trim()
-    const lowerText = text.toLowerCase()
+    const rawText = (transcription.text || "").trim()
+    const segments = transcription.segments || []
 
-    if (
-      HALLUCINATION_ARTIFACTS.some(
-        (artifact) => lowerText === artifact || lowerText.startsWith(artifact)
-      )
-    ) {
-      text = ''
+    // Check Whisper silence & low-confidence metrics
+    const isSilent =
+      segments.length > 0 &&
+      segments.every((s: any) => s.no_speech_prob > 0.45 || s.avg_logprob < -0.9)
+
+    // Blocked common hallucination phrases
+    const hallucinationList = [
+      "thank you",
+      "thank you.",
+      "thank you for watching",
+      "thanks for watching",
+      "hienglish",
+      "hinglish",
+      "english",
+      "hindi",
+      "subtitles by",
+      "bye",
+      "you",
+      ".",
+    ]
+
+    if (isSilent || hallucinationList.includes(rawText.toLowerCase()) || rawText.length === 0) {
+      return NextResponse.json({ text: "", isSilent: true })
     }
 
-    return NextResponse.json({
-      text,
-      language: (transcription as any).language || 'auto',
-    })
+    return NextResponse.json({ text: rawText, language: transcription.language || "auto" })
   } catch (error: any) {
-    console.error('STT Route Error:', error)
-    return NextResponse.json(
-      { error: error?.message || 'Failed to process audio' },
-      { status: 500 }
-    )
+    return NextResponse.json({ error: error.message || "STT transcription failed" }, { status: 500 })
   }
 }
