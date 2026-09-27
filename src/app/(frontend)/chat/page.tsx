@@ -124,6 +124,8 @@ export default function ChatPage() {
   const autoSpeakRef = useRef<boolean>(true)
   const selectedVoiceRef = useRef<string>('auto')
   const outputLanguageRef = useRef<'auto' | 'en' | 'hi'>('auto')
+  const abortControllerRef = useRef<AbortController | null>(null)
+  const inputRef = useRef<HTMLTextAreaElement | null>(null)
 
   useEffect(() => {
     const savedVoice = localStorage.getItem('parsea_voice')
@@ -256,6 +258,22 @@ export default function ChatPage() {
     isPlayingRef.current = false
     setIsAudioQueuePlaying(false)
     sentenceBufferRef.current = ''
+  }
+
+  const handleStopSpeakingAndGeneration = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort()
+      abortControllerRef.current = null
+    }
+
+    stopAllAudio()
+
+    setIsStreaming(false)
+    setIsRecording(false)
+
+    setTimeout(() => {
+      inputRef.current?.focus()
+    }, 50)
   }
 
   // Mic Recording (MediaRecorder STT)
@@ -431,7 +449,7 @@ export default function ChatPage() {
   }, [messages, isStreaming])
 
   const handleStartNewChat = () => {
-    stopAllAudio()
+    handleStopSpeakingAndGeneration()
     const newId = crypto.randomUUID()
     sessionStorage.setItem('parsea_conversation_id', newId)
     setConversationId(newId)
@@ -441,9 +459,15 @@ export default function ChatPage() {
 
   const handleSendQuery = async (queryText: string) => {
     const trimmed = queryText.trim()
-    if (!trimmed || isStreaming) return
+    if (!trimmed) return
 
-    stopAllAudio()
+    handleStopSpeakingAndGeneration()
+
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort()
+    }
+    abortControllerRef.current = new AbortController()
+    const signal = abortControllerRef.current.signal
 
     const currentConvId = conversationId || crypto.randomUUID()
     if (!conversationId) {
@@ -489,6 +513,7 @@ export default function ChatPage() {
         const response = await fetch('/api/chat/stream', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
+          signal,
           body: JSON.stringify({
             question: trimmed,
             mode: 'quick',
@@ -536,13 +561,20 @@ export default function ChatPage() {
           sentenceBufferRef.current = ''
         }
       } catch (err: any) {
-        console.error('Quick Chat Error:', err)
-        updateAssistant({
-          content: `**Error:** ${err?.message || 'Quick Chat failed. Please try again.'}`,
-        })
+        if (err.name === 'AbortError') {
+          console.log('Quick Chat stream aborted by user.')
+        } else {
+          console.error('Quick Chat Error:', err)
+          updateAssistant({
+            content: `**Error:** ${err?.message || 'Quick Chat failed. Please try again.'}`,
+          })
+        }
       } finally {
         setIsStreaming(false)
         setStreamStatus('Searching your notes...')
+        if (abortControllerRef.current?.signal === signal) {
+          abortControllerRef.current = null
+        }
       }
     } else {
       // Deep Analysis Mode (Server Nemotron RAG)
@@ -561,6 +593,7 @@ export default function ChatPage() {
         const response = await fetch('/api/chat/stream', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
+          signal,
           body: JSON.stringify({
             question: trimmed,
             conversationId: currentConvId,
@@ -641,19 +674,29 @@ export default function ChatPage() {
         }
         if (buffer.trim()) processEvent(buffer)
       } catch (err: any) {
-        updateAssistant({
-          content: `**Error:** ${err?.message || 'Failed to generate response. Please try again.'}`,
-        })
+        if (err.name === 'AbortError') {
+          console.log('Deep Analysis stream aborted by user.')
+        } else {
+          console.error('Deep Analysis Error:', err)
+          updateAssistant({
+            content: `**Error:** ${err?.message || 'Failed to generate response. Please try again.'}`,
+          })
+        }
       } finally {
         setIsStreaming(false)
         setStreamStatus('Searching your notes...')
+        if (abortControllerRef.current?.signal === signal) {
+          abortControllerRef.current = null
+        }
       }
     }
   }
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    handleSendQuery(inputQuestion)
+    if (inputQuestion.trim() && !isTranscribing) {
+      handleSendQuery(inputQuestion)
+    }
   }
 
   const isPending = isStreaming
@@ -817,8 +860,8 @@ export default function ChatPage() {
                     </div>
 
                     {msg.mode === 'quick' && (
-                      <span className="badge badge-purple badge-rounded" title="Processed directly in your browser via WebGPU">
-                        WebGPU
+                      <span className="badge badge-purple badge-rounded" title="Processed via Groq Quick Chat AI">
+                        Quick Chat
                       </span>
                     )}
                     {msg.retrievalBypassed && (
@@ -998,6 +1041,7 @@ export default function ChatPage() {
         >
           {/* Textarea on Top (Compact single line, max 112px) */}
           <textarea
+            ref={inputRef}
             className="w-full bg-transparent border-none resize-none outline-none focus:ring-0 px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground min-h-[40px] max-h-28 overflow-y-auto"
             rows={1}
             value={inputQuestion}
@@ -1005,7 +1049,7 @@ export default function ChatPage() {
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault()
-                if (inputQuestion.trim() && !isPending && !isTranscribing) {
+                if (inputQuestion.trim() && !isTranscribing) {
                   handleSendQuery(inputQuestion)
                 }
               }
@@ -1015,7 +1059,7 @@ export default function ChatPage() {
                 ? "Ask anything — e.g. 'explain pigeonhole principle with diagrams'…"
                 : "Ask a follow-up…"
             }
-            disabled={isPending || isTranscribing}
+            disabled={isTranscribing}
             style={{
               width: '100%',
               background: 'transparent',
@@ -1311,12 +1355,12 @@ export default function ChatPage() {
                 )}
               </div>
 
-              {/* Stop Speaking Button */}
-              {isAudioQueuePlaying && (
+              {/* Stop Speaking / Generation Button */}
+              {(isStreaming || isAudioQueuePlaying) && (
                 <button
                   type="button"
-                  onClick={stopAllAudio}
-                  title="Stop playback and flush audio queue"
+                  onClick={handleStopSpeakingAndGeneration}
+                  title="Stop playback and cancel stream generation"
                   style={{
                     display: 'inline-flex',
                     alignItems: 'center',
@@ -1389,7 +1433,7 @@ export default function ChatPage() {
               {/* Send Button */}
               <button
                 type="submit"
-                disabled={isPending || !inputQuestion.trim() || isTranscribing}
+                disabled={!inputQuestion.trim() || isTranscribing}
                 className="h-7 w-7 rounded-full bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-40 flex items-center justify-center transition-all cursor-pointer shadow-sm"
                 style={{
                   width: 28,
@@ -1401,12 +1445,12 @@ export default function ChatPage() {
                   border: 'none',
                   background: 'var(--color-primary, #0052cc)',
                   color: '#ffffff',
-                  cursor: isPending || !inputQuestion.trim() || isTranscribing ? 'not-allowed' : 'pointer',
-                  opacity: isPending || !inputQuestion.trim() || isTranscribing ? 0.4 : 1,
+                  cursor: !inputQuestion.trim() || isTranscribing ? 'not-allowed' : 'pointer',
+                  opacity: !inputQuestion.trim() || isTranscribing ? 0.4 : 1,
                   fontSize: '0.8rem',
                 }}
               >
-                {isPending ? <span className="btn-spinner" /> : <span>➔</span>}
+                {isStreaming ? <span className="btn-spinner" /> : <span>➔</span>}
               </button>
             </div>
           </div>
