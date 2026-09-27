@@ -1,6 +1,30 @@
 import { NextResponse } from 'next/server'
 import { MsEdgeTTS, OUTPUT_FORMAT } from 'msedge-tts'
 
+function stripMarkdown(text: string): string {
+  if (!text) return ''
+  return (
+    text
+      // Remove code blocks
+      .replace(/```[\s\S]*?```/g, '')
+      // Remove inline code
+      .replace(/`([^`]+)`/g, '$1')
+      // Remove display math $$...$$
+      .replace(/\$\$[\s\S]*?\$\$/g, '')
+      // Remove inline math $...$
+      .replace(/\$[^$]+\$/g, '')
+      // Remove markdown headings, bold, italic
+      .replace(/[#*_-]/g, ' ')
+      // Remove links [text](url) -> text
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+      // Remove table formatting lines
+      .replace(/\|/g, ' ')
+      // Collapse multiple whitespace
+      .replace(/\s+/g, ' ')
+      .trim()
+  )
+}
+
 export async function POST(req: Request) {
   try {
     const apiKey = process.env.GROQ_API_KEY
@@ -18,28 +42,47 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Text is required for speech synthesis' }, { status: 400 })
     }
 
+    const cleanText = stripMarkdown(text)
+    const textToSynthesize = cleanText || text
+
     let selectedVoice = voice
     if (selectedVoice === 'auto' || !selectedVoice) {
-      const isDevanagari = /[\u0900-\u097F]/.test(text)
+      const isDevanagari = /[\u0900-\u097F]/.test(textToSynthesize)
       selectedVoice = isDevanagari ? 'hi-IN-SwaraNeural' : 'en-IN-NeerjaNeural'
     }
 
     const tts = new MsEdgeTTS()
     await tts.setMetadata(selectedVoice, OUTPUT_FORMAT.AUDIO_24KHZ_96KBITRATE_MONO_MP3)
-    const streamResult = tts.toStream(text)
+    const streamResult = tts.toStream(textToSynthesize)
     const audioStream = (streamResult as any).audioStream || streamResult
 
-    const webStream = new ReadableStream({
-      start(controller) {
-        audioStream.on('data', (chunk: Buffer) => controller.enqueue(chunk))
-        audioStream.on('end', () => controller.close())
-        audioStream.on('error', (err: any) => controller.error(err))
-      },
+    const chunks: Buffer[] = []
+    await new Promise<void>((resolve, reject) => {
+      audioStream.on('data', (chunk: Buffer) => {
+        chunks.push(chunk)
+      })
+      audioStream.on('end', () => resolve())
+      audioStream.on('close', () => resolve())
+      audioStream.on('error', (err: any) => {
+        if (chunks.length > 0) {
+          console.warn('TTS stream emitted warning after data received:', err?.message)
+          resolve()
+        } else {
+          reject(err)
+        }
+      })
     })
 
-    return new Response(webStream, {
+    if (chunks.length === 0) {
+      return NextResponse.json({ error: 'Speech synthesis yielded empty audio' }, { status: 500 })
+    }
+
+    const audioBuffer = Buffer.concat(chunks)
+
+    return new Response(audioBuffer, {
       headers: {
         'Content-Type': 'audio/mpeg',
+        'Content-Length': audioBuffer.length.toString(),
         'Cache-Control': 'no-cache',
       },
     })
