@@ -7,7 +7,6 @@ import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
 import 'katex/dist/katex.min.css'
-import { getWebLLMEngine } from '@/lib/webllm'
 
 interface SourceCitation {
   document: string
@@ -90,7 +89,6 @@ export default function ChatPage() {
 
   // Dual-Mode State
   const [chatMode, setChatMode] = useState<'quick' | 'deep'>('quick')
-  const [webLlmProgress, setWebLlmProgress] = useState<string>('')
   const [expandedSourcesId, setExpandedSourcesId] = useState<string | null>(null)
 
   // Popover UI State
@@ -481,48 +479,42 @@ export default function ChatPage() {
     }
 
     if (chatMode === 'quick') {
-      setStreamStatus('Initializing WebGPU AI...')
+      setStreamStatus('Generating quick spoken response...')
       try {
-        const engine = await getWebLLMEngine((report) => {
-          setWebLlmProgress(report.text)
-          const pct = Math.round((report.progress || 0) * 100)
-          setStreamStatus(`Loading in-browser AI: ${pct}%`)
-        })
-        setWebLlmProgress('')
-        setStreamStatus('Generating quick spoken response...')
+        const historyPayload = updatedMessages.slice(-5).map((m) => ({
+          role: m.role,
+          content: m.content,
+        }))
 
-        let langInstruction = 'Respond in the primary language used by the user in their prompt.'
-        if (outputLanguageRef.current === 'hi') {
-          langInstruction =
-            'CRITICAL INSTRUCTION: You MUST formulate your entire response strictly in standard Hindi (Devanagari script - हिन्दी), regardless of whether the user speaks or writes in English, Hinglish, or Hindi. Do not use Romanized Hindi.'
-        } else if (outputLanguageRef.current === 'en') {
-          langInstruction =
-            'CRITICAL INSTRUCTION: You MUST formulate your entire response strictly in clear, natural English, regardless of whether the user speaks or writes in Hindi or Hinglish.'
+        const response = await fetch('/api/chat/stream', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            question: trimmed,
+            mode: 'quick',
+            targetLanguage: outputLanguageRef.current,
+            messages: historyPayload,
+          }),
+        })
+
+        if (!response.ok || !response.body) {
+          throw new Error((await response.text()) || 'Quick Chat request failed.')
         }
 
-        const completionStream = await engine.chat.completions.create({
-          messages: [
-            {
-              role: 'system',
-              content:
-                'You are a concise voice assistant for Parsea study desk. Give a direct 1-3 sentence spoken answer without bullet points, markdown headers, or citations. ' +
-                langInstruction,
-            },
-            { role: 'user', content: trimmed },
-          ],
-          stream: true,
-          max_tokens: 250,
-        })
-
+        const reader = response.body.getReader()
+        const decoder = new TextDecoder()
         let streamedContent = ''
-        for await (const chunk of completionStream) {
-          const delta = chunk.choices[0]?.delta?.content || ''
-          if (delta) {
-            streamedContent += delta
+
+        while (true) {
+          const { value, done } = await reader.read()
+          if (done) break
+          const chunk = decoder.decode(value, { stream: true })
+          if (chunk) {
+            streamedContent += chunk
             updateAssistant({ content: streamedContent })
 
             if (autoSpeakRef.current) {
-              sentenceBufferRef.current += delta
+              sentenceBufferRef.current += chunk
               const sentenceEndRegex = /([.?!।\n]+)/
               const parts = sentenceBufferRef.current.split(sentenceEndRegex)
 
@@ -544,13 +536,12 @@ export default function ChatPage() {
           sentenceBufferRef.current = ''
         }
       } catch (err: any) {
-        console.error('WebLLM Error:', err)
+        console.error('Quick Chat Error:', err)
         updateAssistant({
-          content: `**Error:** ${err?.message || 'WebGPU initialization failed. Try switching to Deep Analysis mode.'}`,
+          content: `**Error:** ${err?.message || 'Quick Chat failed. Please try again.'}`,
         })
       } finally {
         setIsStreaming(false)
-        setWebLlmProgress('')
         setStreamStatus('Searching your notes...')
       }
     } else {
@@ -995,22 +986,6 @@ export default function ChatPage() {
           </div>
         )}
 
-        {webLlmProgress && chatMode === 'quick' && (
-          <div
-            style={{
-              padding: '4px 10px',
-              marginBottom: '6px',
-              borderRadius: '6px',
-              backgroundColor: '#e3f2fd',
-              color: '#0288d1',
-              fontSize: '0.78rem',
-              fontWeight: 600,
-            }}
-          >
-            ⚡ {webLlmProgress}
-          </div>
-        )}
-
         <form
           onSubmit={handleSubmit}
           className="rounded-2xl border border-border/60 bg-background/95 shadow-sm backdrop-blur focus-within:ring-2 focus-within:ring-primary/20 transition-all overflow-visible relative"
@@ -1131,10 +1106,10 @@ export default function ChatPage() {
                     >
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.8rem', fontWeight: 600, color: '#111' }}>
                         <span>⚡ Quick Chat</span>
-                        <span style={{ fontSize: '0.68rem', color: '#1976d2', fontFamily: 'monospace' }}>(WebGPU)</span>
+                        <span style={{ fontSize: '0.68rem', color: '#1976d2', fontFamily: 'monospace' }}>(Groq 8B)</span>
                       </div>
                       <p style={{ fontSize: '0.72rem', color: '#666', marginTop: 2, margin: 0 }}>
-                        Fast conversational answers & in-browser WebGPU inference.
+                        Blazing-fast conversational answers & instant voice synthesis.
                       </p>
                     </div>
 
